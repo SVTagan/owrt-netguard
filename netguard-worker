@@ -102,6 +102,10 @@ handle_stop() {
 trap 'handle_stop' TERM INT
 
 snapshot 1 || exit 2
+if [ "$mode" = bounded ]; then
+    printf 'OWRT NetGuard — bounded worker (RAM state only)\n'
+    printf 'Cycles=%s interval=%ss\n' "$cycles" "$interval"
+fi
 while :; do
     cycle=$((cycle + 1))
     tmpout=$(mktemp "$runtime_dir/.probe.XXXXXX") || exit 2
@@ -129,9 +133,16 @@ while :; do
         result=PROBE_ERROR
     fi
 
-    # Events only, not every observation: keep logd and flash pressure low.
+    # Only bounded manual tests print each sample; the procd mode emits
+    # transitions only so the router log is not flooded.
+    if [ "$mode" = bounded ]; then
+        printf 'SAMPLE %s/%s result=%s check_exit=%s\n' "$cycle" "$cycles" "$result" "$check_rc"
+    fi
     ng_step "$result"
     snapshot 1 || exit 2
+    if [ "$mode" = bounded ]; then
+        printf 'STATE phase=%s result=%s\n' "$ng_phase" "$result"
+    fi
     if [ "$cycles" -gt 0 ] && [ "$cycle" -ge "$cycles" ]; then
         break
     fi
