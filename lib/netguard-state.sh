@@ -19,7 +19,7 @@ ng_observe_family() {
         LOCAL_DNS_UNAVAILABLE|EXTERNAL_DNS_UNCONFIRMED|DNS_PATH_UNCONFIRMED) ng_family=DNS ;;
         EXTERNAL_REACHABILITY_UNCONFIRMED) ng_family=CONNECTIVITY ;;
         PARTIAL_REACHABILITY) ng_family=DEGRADED ;;
-        UNKNOWN_ROUTE) ng_family=UNKNOWN ;;
+        UNKNOWN_ROUTE|PROBE_ERROR) ng_family=UNKNOWN ;;
         *) return 2 ;;
     esac
 }
