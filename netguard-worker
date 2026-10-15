@@ -36,7 +36,7 @@ fi
 
 check_script=${NETGUARD_CHECK_PATH:-/usr/bin/owrt-netguard}
 state_lib=${NETGUARD_STATE_PATH:-/usr/lib/netguard/netguard-state.sh}
-runtime_dir=${NETGUARD_RUNTIME_DIR:-/tmp/owrt-netguard}
+runtime_dir=${NETGUARD_RUNTIME_DIR:-/tmp/netguard-runtime}
 
 # Never permit a persistent location via environment overrides.
 case "$runtime_dir" in
