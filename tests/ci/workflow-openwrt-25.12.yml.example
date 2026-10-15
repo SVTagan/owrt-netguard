@@ -1,0 +1,32 @@
+# Template for .github/workflows/openwrt-25.12.yml
+# Deliberately manual-only; does not run on push or pull_request.
+name: OpenWrt 25.12 VM verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: netguard-25-12-vm
+  cancel-in-progress: false
+
+jobs:
+  test-openwrt:
+    name: OpenWrt 25.12.5 x86_64 / QEMU
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install virtualization dependencies
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 openssh-client sshpass
+
+      - name: Run VM tests
+        shell: bash
+        run: bash tests/ci/openwrt-25.12-qemu.sh
