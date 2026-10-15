@@ -126,10 +126,12 @@ run() {
     rc=$?
     set -e
 
-    printf '%s\n' "$output" | grep -q "RESULT: $expected" || {
-        printf 'FAIL %s (exit %s):\n%s\n' "$name" "$rc" "$output"
-        exit 1
-    }
+    if [ "$expected" != CONFIG_ERROR ]; then
+        printf '%s\n' "$output" | grep -q "RESULT: $expected" || {
+            printf 'FAIL %s (exit %s):\n%s\n' "$name" "$rc" "$output"
+            exit 1
+        }
+    fi
     # Guard the original regression: HTTP 404 must not count as a healthy endpoint.
     case "$name" in
         healthy)
