@@ -102,7 +102,7 @@ NETGUARD_CHECK_PATH=/tmp/owrt-netguard NETGUARD_STATE_PATH=/tmp/netguard-state.s
 cat /tmp/netguard-runtime/status
 ```
 
-Для теста требуются актуальные `/tmp/owrt-netguard` и `/tmp/netguard-state.sh`, уже загруженные по инструкциям выше. `--forever` существует только для будущего явно разрешённого `procd`-запуска; **пока его на рабочем роутере не используйте**. Офлайн-сценарии: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. Код опубликован, но worker ещё не проверен на физическом роутере.
+Для теста требуются актуальные `/tmp/owrt-netguard` и `/tmp/netguard-state.sh`, уже загруженные по инструкциям выше. `--forever` существует только для будущего явно разрешённого `procd`-запуска; **пока его на рабочем роутере не используйте**. Офлайн-сценарии: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. Для будущей виртуальной OpenWrt 25.12.5 подготовлен [отдельный тест жизненного цикла procd](tests/ci/procd-guest.sh): выключенный сервис → явное включение → RAM-состояние → остановка → повторный запуск. Он пока не запускался. Worker теперь проверен на реальном Redmi AX6000 (OpenWrt 24.10.5): три цикла дали `HEALTHY_SAMPLED`, итоговый RAM-снимок показал `running=0`, `phase=HEALTHY`, `result=HEALTHY_SAMPLED`, `cycle=3`. Работа через `procd`, реальное аварийное завершение и постоянное хранение событий ещё не проверялись.
 
 ## Направления разработки
 
