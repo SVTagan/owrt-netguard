@@ -20,7 +20,7 @@ case "${1:-}" in
     *) usage >&2; exit 2 ;;
 esac
 
-for utility in ubus jsonfilter ip curl nslookup timeout grep; do
+for utility in ubus jsonfilter ip curl nslookup grep; do
     if ! command -v "$utility" >/dev/null 2>&1; then
         printf 'ERROR: missing command: %s\n' "$utility" >&2
         exit 2
@@ -161,7 +161,7 @@ dns_probe() {
         fi
     fi
     # A resolver banner alone is not a successful answer.
-    answer=$(timeout 4 nslookup example.com "$server" 2>/dev/null)
+    answer=$(nslookup -timeout=4 -retry=1 -type=A example.com "$server" 2>/dev/null)
     rc=$?
     if [ "$rc" -eq 0 ] && printf '%s\n' "$answer" | grep -q '^Name:'; then
         dns_ok=$((dns_ok + 1))
