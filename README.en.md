@@ -70,7 +70,20 @@ Offline smoke tests: `sh tests/smoke.sh ./owrt-netguard` (15 modeled scenarios, 
 
 A separate [shell state library](lib/netguard-state.sh) accepts normalized `check` results and determines when an incident opens, changes classification, and resolves. Provisional thresholds are three consecutive failures of the same class and two confirmed healthy observations. DNS symptoms do not open a second incident while a WAN incident is active. An unknown result does not count as recovery.
 
-This is an **isolated in-memory prototype**, not yet connected to `check` or any background service. It has no flash journal, outage timing, or reboot persistence. Offline sequence tests: `sh tests/state.sh ./lib/netguard-state.sh`. Committing tests does not mean they have passed on OpenWrt.
+The library is now connected to `check` by a separate [bounded foreground monitor](netguard-monitor). It runs a specified number of diagnostic cycles, prints state transitions and exits. **This is not an installed background service**: there is no boot-time startup, persistent flash journal, network recovery or state retention across restarts. Thresholds and intervals remain provisional.
+
+To try three cycles with a 10-second pause on OpenWrt, download all three files into `/tmp`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/SVTagan/owrt-netguard/main/owrt-netguard -o /tmp/owrt-netguard
+curl -fsSL https://raw.githubusercontent.com/SVTagan/owrt-netguard/main/lib/netguard-state.sh -o /tmp/netguard-state.sh
+curl -fsSL https://raw.githubusercontent.com/SVTagan/owrt-netguard/main/netguard-monitor -o /tmp/netguard-monitor
+sh /tmp/netguard-monitor 3 10
+```
+
+The monitor requires an explicit number of cycles (1–30). The interval defaults to 30 seconds. Output includes `SAMPLE`, `STATE` and transition events `OPEN`, `RECLASSIFIED` and `RESOLVED`. Diagnostic command errors become `PROBE_ERROR` instead of being mistaken for proven network outages. Incident state exists **only within the running process**.
+
+Tests: `sh tests/state.sh ./lib/netguard-state.sh` and `sh tests/monitor.sh ./netguard-monitor ./lib/netguard-state.sh`. An earlier library version passed **43 state transitions** on a physical AX6000 with OpenWrt 24.10.5. The new integrated foreground monitor has not yet been hardware-tested. Local mock scenarios have been exercised; the OpenWrt 25.12 VM has not yet been run.
 
 ## Development direction
 
