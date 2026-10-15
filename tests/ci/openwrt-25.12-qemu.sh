@@ -84,12 +84,15 @@ ssh_guest 'apk update && apk add curl ca-bundle'
 echo "== Copy current code and offline smoke tests into guest RAM =="
 ssh_input 'cat > /tmp/owrt-netguard' < owrt-netguard
 ssh_input 'cat > /tmp/netguard-smoke.sh' < tests/smoke.sh
+ssh_input 'cat > /tmp/netguard-state.sh' < lib/netguard-state.sh
+ssh_input 'cat > /tmp/netguard-state-test.sh' < tests/state.sh
 
 echo "== Syntax test using OpenWrt BusyBox shell =="
-ssh_guest 'sh -n /tmp/owrt-netguard && sh -n /tmp/netguard-smoke.sh'
+ssh_guest 'sh -n /tmp/owrt-netguard && sh -n /tmp/netguard-smoke.sh && sh -n /tmp/netguard-state.sh && sh -n /tmp/netguard-state-test.sh'
 
 echo "== Run deterministic smoke tests inside genuine OpenWrt 25.12 =="
 ssh_guest 'sh /tmp/netguard-smoke.sh /tmp/owrt-netguard'
+ssh_guest 'sh /tmp/netguard-state-test.sh /tmp/netguard-state.sh'
 
 echo "== Run real one-shot probe in VM; endpoint reachability is informational =="
 # A CI runner is NOT representative of Crimea or any ISP. Any meaningful
