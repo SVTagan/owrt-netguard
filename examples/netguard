@@ -1,0 +1,27 @@
+# Optional OWRT NetGuard probe configuration.
+# Copy manually to /etc/config/netguard after reviewing and editing.
+# UCI package names cannot contain hyphens: file name is 'netguard'.
+#
+# Each 'list https' entry:
+#   name|IPv4|TLS-hostname|URL-path|expected-HTTP-code
+# The last field can be '-' for a transport-only check.
+# Each 'list dns' entry:
+#   name|resolver-IPv4
+#
+# No spaces within list entries. Maximum 12 entries in each list.
+# If an entire list option is absent, NetGuard falls back to built-in defaults.
+#
+# These example addresses are NOT guaranteed to be reachable in your region.
+# Do not treat provider portals or allowlisted sites as proof of general Internet:
+# their special diagnostic role is not implemented in this prototype.
+
+config netguard 'main'
+    list https 'yandex|77.88.8.88|safe.dot.dns.yandex.net|/|-'
+    list https 'cloudflare|1.1.1.1|one.one.one.one|/cdn-cgi/trace|200'
+    list https 'google|8.8.8.8|dns.google|/resolve?name=example.com&type=A|200'
+    list https 'quad9|9.9.9.9|dns.quad9.net|/|-'
+
+    list dns 'yandex|77.88.8.8'
+    list dns 'cloudflare|1.1.1.1'
+    list dns 'quad9|9.9.9.9'
+    list dns 'google|8.8.8.8'
