@@ -5,6 +5,35 @@ set -eu
 script=${1:-./owrt-netguard}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
+mkdir -p "$work/config" "$work/empty"
+: > "$work/config/netguard"
+
+cat > "$work/uci" <<'MOCK'
+#!/bin/sh
+for last do :; done
+case "${NETGUARD_TEST_SCENARIO:-}" in
+    custom_pool|custom_partial|custom_dns|invalid_https|invalid_ipv4)
+        case "$*" in
+            *"show netguard") exit 0 ;;
+            *"get netguard.main.https")
+                case "${NETGUARD_TEST_SCENARIO:-}" in
+                    custom_pool) echo 'my_cf|1.1.1.1|one.one.one.one|/cdn-cgi/trace|200 my_google|8.8.8.8|dns.google|/resolve?name=example.com&type=A|200' ;;
+                    custom_partial) echo 'portal|203.0.113.1|portal.example|/|200' ;;
+                    invalid_https) echo 'bad|1.1.1.1|one.one.one.one|wrong-path|200' ;;
+                    invalid_ipv4) echo 'bad|1.2.3.4.|example.com|/|200' ;;
+                    *) exit 1 ;;
+                esac ;;
+            *"get netguard.main.dns")
+                case "${NETGUARD_TEST_SCENARIO:-}" in
+                    custom_dns) echo 'only_custom|1.1.1.1 other_custom|8.8.8.8' ;;
+                    *) exit 1 ;;
+                esac ;;
+        esac ;;
+    invalid_uci)
+        case "$*" in *"show netguard") exit 1 ;; esac ;;
+esac
+exit 1
+MOCK
 
 cat > "$work/ubus" <<'MOCK'
 #!/bin/sh
@@ -88,7 +117,12 @@ chmod +x "$work"/*
 run() {
     name=$1 expected=$2
     set +e
-    output=$(PATH="$work:$PATH" NETGUARD_TEST_SCENARIO="$name" sh "$script" check 2>&1)
+    case "$name" in
+        custom_pool|custom_partial|custom_dns|invalid_https|invalid_ipv4|invalid_uci)
+            config_dir="$work/config" ;;
+        *) config_dir="$work/empty" ;;
+    esac
+    output=$(PATH="$work:$PATH" OWRT_NETGUARD_CONFIG_DIR="$config_dir" NETGUARD_TEST_SCENARIO="$name" sh "$script" check 2>&1)
     rc=$?
     set -e
 
@@ -104,9 +138,23 @@ run() {
         one_good)
             printf '%s\n' "$output" | grep -q 'HTTPS healthy=1' || exit 1
             printf '%s\n' "$output" | grep -q 'HTTPS google.*UNEXPECTED (HTTP 451' || exit 1 ;;
+        custom_pool)
+            printf '%s\n' "$output" | grep -q 'Endpoints: HTTPS=2 (uci)' || exit 1
+            printf '%s\n' "$output" | grep -q 'HTTPS my_cf' || exit 1 ;;
+        custom_dns)
+            printf '%s\n' "$output" | grep -q 'external DNS=2 (uci)' || exit 1
+            printf '%s\n' "$output" | grep -q 'DNS   only_custom' || exit 1 ;;
+        custom_partial)
+            printf '%s\n' "$output" | grep -q 'HTTPS portal' || exit 1 ;;
+        invalid_https|invalid_ipv4|invalid_uci)
+            printf '%s\n' "$output" | grep -q 'ERROR:' || exit 1 ;;
     esac
 
-    if [ "$expected" = HEALTHY_SAMPLED ]; then expected_rc=0; else expected_rc=1; fi
+    case "$expected" in
+        HEALTHY_SAMPLED) expected_rc=0 ;;
+        CONFIG_ERROR) expected_rc=2 ;;
+        *) expected_rc=1 ;;
+    esac
     [ "$rc" -eq "$expected_rc" ] || {
         printf 'FAIL %s: unexpected exit code %s (wanted %s)\n%s\n' "$name" "$rc" "$expected_rc" "$output"
         exit 1
@@ -123,3 +171,9 @@ run http_restricted PARTIAL_REACHABILITY
 run one_good PARTIAL_REACHABILITY
 run external_dns_down EXTERNAL_DNS_UNCONFIRMED
 run wan_no_l3 WAN_NO_L3
+run custom_pool HEALTHY_SAMPLED
+run custom_dns HEALTHY_SAMPLED
+run custom_partial PARTIAL_REACHABILITY
+run invalid_https CONFIG_ERROR
+run invalid_ipv4 CONFIG_ERROR
+run invalid_uci CONFIG_ERROR
