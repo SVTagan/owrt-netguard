@@ -32,7 +32,7 @@ The temporary file is not installed or enabled at boot. Missing dependencies pro
 OWRT_NETGUARD_WAN=wan2 sh /tmp/owrt-netguard check
 ```
 
-The prototype uses `ubus`, `jsonfilter`, `ip`, `curl`, `nslookup`, `timeout` and standard BusyBox tools. `nft` is optional and is used to identify destinations selected by Podkop's current nft set.
+The prototype uses `ubus`, `jsonfilter`, `ip`, `curl`, `nslookup` with built-in timeout/retry options (`-timeout`/`-retry`) and standard BusyBox tools. `nft` is optional and is used to identify destinations selected by Podkop's current nft set.
 
 Current features: WAN state, several DNS-independent HTTPS probes using explicitly pinned IPs and TLS validation, plus multiple external DNS resolvers. In healthy conditions it stops after two successful probes of each type; more targets are checked when needed. Example results: `HEALTHY_SAMPLED`, `PARTIAL_REACHABILITY`, `LOCAL_DNS_UNAVAILABLE`, and `DNS_PATH_UNCONFIRMED`.
 
