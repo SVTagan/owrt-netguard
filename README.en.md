@@ -102,7 +102,7 @@ NETGUARD_CHECK_PATH=/tmp/owrt-netguard NETGUARD_STATE_PATH=/tmp/netguard-state.s
 cat /tmp/netguard-runtime/status
 ```
 
-Current copies of `/tmp/owrt-netguard` and `/tmp/netguard-state.sh` are required. The `--forever` mode is intended solely for an explicitly enabled future procd service; **do not use it on a production router yet**. Offline tests: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. The worker has not yet been tested on physical OpenWrt hardware.
+Current copies of `/tmp/owrt-netguard` and `/tmp/netguard-state.sh` are required. The `--forever` mode is intended solely for an explicitly enabled future procd service; **do not use it on a production router yet**. Offline tests: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. A [separate procd lifecycle test](tests/ci/procd-guest.sh) is prepared for the future OpenWrt 25.12.5 VM run: disabled startup, explicit enable, RAM state, stop and restart. It has not yet been executed. The worker has now been tested on a physical Redmi AX6000 running OpenWrt 24.10.5: three cycles returned `HEALTHY_SAMPLED`, with a final RAM snapshot of `running=0`, `phase=HEALTHY`, `result=HEALTHY_SAMPLED`, `cycle=3`. Actual procd process management, forced failures and persistent incident history are still untested.
 
 ## Development direction
 
