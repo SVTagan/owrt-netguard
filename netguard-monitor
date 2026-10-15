@@ -1,0 +1,92 @@
+#!/bin/sh
+# Bounded foreground integration test: check -> incident state machine.
+# No autostart, persistent journal, configuration changes or recovery.
+
+set -u
+
+usage() {
+    printf 'Usage: sh netguard-monitor CYCLES [INTERVAL_SECONDS]\n'
+    printf 'Runs 1..30 diagnostic cycles in foreground (default interval: 30s).\n'
+    printf 'Optional paths: NETGUARD_CHECK_PATH and NETGUARD_STATE_PATH.\n'
+}
+
+case "${1:-}" in
+    -h|--help|help) usage; exit 0 ;;
+esac
+[ "$#" -ge 1 ] && [ "$#" -le 2 ] || { usage >&2; exit 2; }
+
+cycles=$1
+interval=${2:-30}
+case "$cycles:$interval" in
+    *[!0-9:]*|:*|*:) printf 'ERROR: cycles and interval must be integers\n' >&2; exit 2 ;;
+esac
+if ! [ "$cycles" -ge 1 ] 2>/dev/null || ! [ "$cycles" -le 30 ] 2>/dev/null ||
+   ! [ "$interval" -ge 0 ] 2>/dev/null || ! [ "$interval" -le 3600 ] 2>/dev/null; then
+    printf 'ERROR: allowed cycles 1..30, interval 0..3600 seconds\n' >&2
+    exit 2
+fi
+
+case "$0" in
+    */*) script_dir=${0%/*} ;;
+    *) script_dir=. ;;
+esac
+
+check_script=${NETGUARD_CHECK_PATH:-"$script_dir/owrt-netguard"}
+state_file=${NETGUARD_STATE_PATH:-"$script_dir/lib/netguard-state.sh"}
+if [ ! -r "$state_file" ] && [ -z "${NETGUARD_STATE_PATH:-}" ]; then
+    state_file="$script_dir/netguard-state.sh"
+fi
+
+if [ ! -r "$check_script" ] || [ ! -r "$state_file" ]; then
+    printf 'ERROR: cannot read diagnostic check or incident library\n' >&2
+    printf 'Check: %s\nState: %s\n' "$check_script" "$state_file" >&2
+    exit 2
+fi
+
+. "$state_file"
+ng_reset
+
+printf 'OWRT NetGuard — bounded foreground monitor (read-only)\n'
+printf 'Cycles=%s interval=%ss; no persistent history\n' "$cycles" "$interval"
+
+cycle=1
+while [ "$cycle" -le "$cycles" ]; do
+    # Capturing output preserves the RESULT even when check returns 1 for a
+    # negative diagnostic result. Exit 2 means a tool/configuration failure.
+    check_output=$(sh "$check_script" check 2>&1)
+    check_rc=$?
+
+    result=
+    while IFS= read -r line; do
+        case "$line" in
+            'RESULT: '*) result=${line#RESULT: } ;;
+        esac
+    done <<EOF
+$check_output
+EOF
+
+    if [ "$check_rc" -gt 1 ] || [ -z "$result" ]; then
+        result=PROBE_ERROR
+    elif ! ng_observe_family "$result"; then
+        result=PROBE_ERROR
+    elif [ "$check_rc" -eq 0 ] && [ "$result" != HEALTHY_SAMPLED ]; then
+        result=PROBE_ERROR
+    elif [ "$check_rc" -ne 0 ] && [ "$result" = HEALTHY_SAMPLED ]; then
+        result=PROBE_ERROR
+    fi
+
+    printf 'SAMPLE %s/%s result=%s check_exit=%s\n' "$cycle" "$cycles" "$result" "$check_rc"
+    ng_step "$result"
+    printf 'STATE phase=%s' "$ng_phase"
+    if [ "$ng_phase" = OPEN ] || [ "$ng_phase" = RECOVERING ]; then
+        printf ' incident=%s family=%s' "$ng_incident" "$ng_root"
+    fi
+    printf '\n'
+
+    if [ "$cycle" -lt "$cycles" ]; then
+        sleep "$interval"
+    fi
+    cycle=$((cycle + 1))
+done
+
+printf 'END: foreground monitor finished; no service left running\n'
