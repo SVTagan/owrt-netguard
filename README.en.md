@@ -83,7 +83,26 @@ sh /tmp/netguard-monitor 3 10
 
 The monitor requires an explicit number of cycles (1–30). The interval defaults to 30 seconds. Output includes `SAMPLE`, `STATE` and transition events `OPEN`, `RECLASSIFIED` and `RESOLVED`. Diagnostic command errors become `PROBE_ERROR` instead of being mistaken for proven network outages. Incident state exists **only within the running process**.
 
-Tests: `sh tests/state.sh ./lib/netguard-state.sh` and `sh tests/monitor.sh ./netguard-monitor ./lib/netguard-state.sh`. An earlier library version passed **43 state transitions** on a physical AX6000 with OpenWrt 24.10.5. The new integrated foreground monitor has not yet been hardware-tested. Local mock scenarios have been exercised; the OpenWrt 25.12 VM has not yet been run.
+Tests: `sh tests/state.sh ./lib/netguard-state.sh` and `sh tests/monitor.sh ./netguard-monitor ./lib/netguard-state.sh`. The state library passed **43 transitions** on a physical AX6000 with OpenWrt 24.10.5. The integrated manual monitor subsequently completed **three consecutive** `HEALTHY_SAMPLED → HEALTHY` cycles and exited cleanly. Failure cases have only been checked with simulated data, not by deliberately disconnecting WAN. The OpenWrt 25.12 VM has not yet been run.
+
+### Experimental service layer (do not install yet)
+
+A [foreground worker](netguard-worker) and [procd init script](service/netguard.init) have been prepared. **They have not been validated in real procd**, and there is no installer. Do not copy the init script to `/etc/init.d`, enable boot startup, or modify your router's service settings yet.
+
+The [sample UCI config](examples/netguard) sets `monitor_enabled=0` by default. A future explicit enablement will be required before procd starts the worker. The provisional interval is 30 seconds after each completed check; procd would supervise the foreground process with rate-limited respawns.
+
+The worker writes an atomic current-state snapshot only to **RAM** (`/tmp/netguard-runtime/status`) and emits incident transition events. It does not persist per-probe history to flash. A crash can leave stale RAM state; this is **not yet a complete `status` CLI**.
+
+To exercise the new worker **without installing a service**, download it into `/tmp` and run three bounded cycles:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/SVTagan/owrt-netguard/main/netguard-worker -o /tmp/netguard-worker
+NETGUARD_CHECK_PATH=/tmp/owrt-netguard NETGUARD_STATE_PATH=/tmp/netguard-state.sh \
+  sh /tmp/netguard-worker --cycles 3 10
+cat /tmp/netguard-runtime/status
+```
+
+Current copies of `/tmp/owrt-netguard` and `/tmp/netguard-state.sh` are required. The `--forever` mode is intended solely for an explicitly enabled future procd service; **do not use it on a production router yet**. Offline tests: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. The worker has not yet been tested on physical OpenWrt hardware.
 
 ## Development direction
 
