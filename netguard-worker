@@ -1,0 +1,143 @@
+#!/bin/sh
+# Experimental OpenWrt worker: foreground, read-only network probes.
+# The only writes are atomic snapshots under /tmp (RAM on OpenWrt).
+# This is NOT an installer and does not enable an init service.
+
+set -u
+
+usage() {
+    printf 'Usage: sh netguard-worker --forever INTERVAL_SECONDS\n'
+    printf '       sh netguard-worker --cycles COUNT INTERVAL_SECONDS\n'
+    printf 'INTERVAL_SECONDS: 10..3600 in forever mode, 0..3600 for bounded tests.\n'
+}
+
+case "${1:-}" in
+    --forever)
+        [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+        cycles=0
+        interval=$2 ;;
+    --cycles)
+        [ "$#" -eq 3 ] || { usage >&2; exit 2; }
+        cycles=$2
+        interval=$3 ;;
+    *) usage >&2; exit 2 ;;
+esac
+case "$cycles:$interval" in
+    *[!0-9:]*|:*|*:) usage >&2; exit 2 ;;
+esac
+[ "$interval" -ge 0 ] 2>/dev/null && [ "$interval" -le 3600 ] 2>/dev/null || exit 2
+if [ "$cycles" -eq 0 ] 2>/dev/null; then
+    [ "$interval" -ge 10 ] || { printf 'ERROR: endless mode needs interval >= 10s\n' >&2; exit 2; }
+else
+    [ "$cycles" -ge 1 ] 2>/dev/null && [ "$cycles" -le 30 ] 2>/dev/null || exit 2
+fi
+
+check_script=${NETGUARD_CHECK_PATH:-/usr/bin/owrt-netguard}
+state_lib=${NETGUARD_STATE_PATH:-/usr/lib/netguard/netguard-state.sh}
+runtime_dir=${NETGUARD_RUNTIME_DIR:-/tmp/owrt-netguard}
+
+# Never permit a persistent location via environment overrides.
+case "$runtime_dir" in
+    /tmp/*) ;;
+    *) printf 'ERROR: runtime directory must be under /tmp\n' >&2; exit 2 ;;
+esac
+if [ -L "$runtime_dir" ]; then
+    printf 'ERROR: runtime directory must not be a symlink\n' >&2
+    exit 2
+fi
+[ -r "$check_script" ] && [ -r "$state_lib" ] || {
+    printf 'ERROR: check or incident library unavailable\n' >&2
+    exit 2
+}
+
+umask 077
+mkdir -p "$runtime_dir" || exit 2
+[ ! -L "$runtime_dir" ] || exit 2
+
+. "$state_lib"
+ng_reset
+
+status_file="$runtime_dir/status"
+child_pid=
+check_rc=2
+result=PROBE_ERROR
+cycle=0
+
+uptime_seconds() {
+    if [ -r /proc/uptime ]; then
+        IFS=' .' read -r uptime_fraction _ < /proc/uptime
+        printf '%s' "$uptime_fraction"
+    else
+        printf '?'
+    fi
+}
+
+snapshot() {
+    running=$1
+    temp=$(mktemp "$runtime_dir/.status.XXXXXX") || return 1
+    {
+        printf 'running=%s\n' "$running"
+        printf 'phase=%s\n' "$ng_phase"
+        printf 'result=%s\n' "$result"
+        printf 'root=%s\n' "$ng_root"
+        printf 'incident_id=%s\n' "$ng_incident"
+        printf 'cycle=%s\n' "$cycle"
+        printf 'sample_uptime_s=%s\n' "$(uptime_seconds)"
+    } > "$temp"
+    mv -f "$temp" "$status_file"
+}
+
+handle_stop() {
+    trap - TERM INT
+    if [ -n "$child_pid" ]; then
+        kill "$child_pid" 2>/dev/null || :
+        wait "$child_pid" 2>/dev/null || :
+    fi
+    child_pid=
+    snapshot 0 || :
+    exit 0
+}
+trap 'handle_stop' TERM INT
+
+snapshot 1 || exit 2
+while :; do
+    cycle=$((cycle + 1))
+    tmpout=$(mktemp "$runtime_dir/.probe.XXXXXX") || exit 2
+    sh "$check_script" check >"$tmpout" 2>&1 &
+    child_pid=$!
+    wait "$child_pid"
+    check_rc=$?
+    child_pid=
+
+    result=
+    while IFS= read -r line; do
+        case "$line" in
+            'RESULT: '*) result=${line#RESULT: } ;;
+        esac
+    done < "$tmpout"
+    rm -f "$tmpout"
+
+    if [ "$check_rc" -gt 1 ] || [ -z "$result" ]; then
+        result=PROBE_ERROR
+    elif ! ng_observe_family "$result"; then
+        result=PROBE_ERROR
+    elif [ "$check_rc" -eq 0 ] && [ "$result" != HEALTHY_SAMPLED ]; then
+        result=PROBE_ERROR
+    elif [ "$check_rc" -ne 0 ] && [ "$result" = HEALTHY_SAMPLED ]; then
+        result=PROBE_ERROR
+    fi
+
+    # Events only, not every observation: keep logd and flash pressure low.
+    ng_step "$result"
+    snapshot 1 || exit 2
+    if [ "$cycles" -gt 0 ] && [ "$cycle" -ge "$cycles" ]; then
+        break
+    fi
+
+    sleep "$interval" &
+    child_pid=$!
+    wait "$child_pid"
+    child_pid=
+done
+
+snapshot 0
