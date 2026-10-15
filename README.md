@@ -32,7 +32,7 @@ sh /tmp/owrt-netguard check
 OWRT_NETGUARD_WAN=wan2 sh /tmp/owrt-netguard check
 ```
 
-Прототип использует `ubus`, `jsonfilter`, `ip`, `curl`, `nslookup`, `timeout` и стандартные BusyBox-утилиты. `nft` используется необязательно, для проверки попадания адресов в набор Podkop.
+Прототип использует `ubus`, `jsonfilter`, `ip`, `curl`, `nslookup` с собственными параметрами таймаута (`-timeout`/`-retry`) и стандартные BusyBox-утилиты. `nft` используется необязательно, для проверки попадания адресов в набор Podkop.
 
 Пока реализованы проверка состояния WAN, несколько HTTPS-целей через явно заданные IP с проверкой TLS и несколько независимых DNS-резолверов. В нормальном случае дальнейшие запросы прекращаются после двух успешных ответов соответствующего типа; при сбое проверяются резервные цели. Примеры результатов: `HEALTHY_SAMPLED`, `PARTIAL_REACHABILITY`, `LOCAL_DNS_UNAVAILABLE`, `DNS_PATH_UNCONFIRMED`.
 
