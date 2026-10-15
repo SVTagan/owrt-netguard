@@ -136,7 +136,7 @@ set -f
 
 valid_ipv4() {
     case "$1" in
-        ''|*[!0-9.]* ) return 1 ;;
+        ''|*[!0-9.]*|.*|*.|*..* ) return 1 ;;
     esac
     old_ifs=$IFS
     IFS=.
