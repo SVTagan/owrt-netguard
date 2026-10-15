@@ -96,6 +96,16 @@ run() {
         printf 'FAIL %s (exit %s):\n%s\n' "$name" "$rc" "$output"
         exit 1
     }
+    # Guard the original regression: HTTP 404 must not count as a healthy endpoint.
+    case "$name" in
+        healthy)
+            printf '%s\n' "$output" | grep -q 'HTTPS yandex.*TRANSPORT_ONLY (HTTP 404' || exit 1
+            printf '%s\n' "$output" | grep -q 'HTTPS healthy=2' || exit 1 ;;
+        one_good)
+            printf '%s\n' "$output" | grep -q 'HTTPS healthy=1' || exit 1
+            printf '%s\n' "$output" | grep -q 'HTTPS quad9.*UNEXPECTED (HTTP 404' || exit 1 ;;
+    esac
+
     if [ "$expected" = HEALTHY_SAMPLED ]; then expected_rc=0; else expected_rc=1; fi
     [ "$rc" -eq "$expected_rc" ] || {
         printf 'FAIL %s: unexpected exit code %s (wanted %s)\n%s\n' "$name" "$rc" "$expected_rc" "$output"
