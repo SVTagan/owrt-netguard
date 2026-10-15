@@ -88,14 +88,18 @@ ssh_input 'cat > /tmp/netguard-state.sh' < lib/netguard-state.sh
 ssh_input 'cat > /tmp/netguard-state-test.sh' < tests/state.sh
 ssh_input 'cat > /tmp/netguard-monitor' < netguard-monitor
 ssh_input 'cat > /tmp/netguard-monitor-test.sh' < tests/monitor.sh
+ssh_input 'cat > /tmp/netguard-worker' < netguard-worker
+ssh_input 'cat > /tmp/netguard-worker-test.sh' < tests/worker.sh
+ssh_input 'cat > /tmp/netguard-init.sh' < service/netguard.init
 
 echo "== Syntax test using OpenWrt BusyBox shell =="
-ssh_guest 'sh -n /tmp/owrt-netguard && sh -n /tmp/netguard-smoke.sh && sh -n /tmp/netguard-state.sh && sh -n /tmp/netguard-state-test.sh && sh -n /tmp/netguard-monitor && sh -n /tmp/netguard-monitor-test.sh'
+ssh_guest 'sh -n /tmp/owrt-netguard && sh -n /tmp/netguard-smoke.sh && sh -n /tmp/netguard-state.sh && sh -n /tmp/netguard-state-test.sh && sh -n /tmp/netguard-monitor && sh -n /tmp/netguard-monitor-test.sh && sh -n /tmp/netguard-worker && sh -n /tmp/netguard-worker-test.sh && sh -n /tmp/netguard-init.sh'
 
 echo "== Run deterministic smoke tests inside genuine OpenWrt 25.12 =="
 ssh_guest 'sh /tmp/netguard-smoke.sh /tmp/owrt-netguard'
 ssh_guest 'sh /tmp/netguard-state-test.sh /tmp/netguard-state.sh'
 ssh_guest 'sh /tmp/netguard-monitor-test.sh /tmp/netguard-monitor /tmp/netguard-state.sh'
+ssh_guest 'sh /tmp/netguard-worker-test.sh /tmp/netguard-worker /tmp/netguard-state.sh'
 
 echo "== Run real one-shot probe in VM; endpoint reachability is informational =="
 # A CI runner is NOT representative of Crimea or any ISP. Any meaningful
