@@ -42,7 +42,29 @@ Statuses include `HEALTHY_SAMPLED` (only the sampled paths, not the entire Inter
 
 An [OpenWrt 25.12.5 QEMU test harness](tests/ci/README.md) has been prepared for manual GitHub Actions runs, but has not been activated or executed. No physical OpenWrt 25.12 hardware test has taken place.
 
-Offline smoke tests: `sh tests/smoke.sh ./owrt-netguard`.
+### Custom probe targets (optional)
+
+Built-in HTTPS and DNS targets are the default. You can override them **without editing the script** using a UCI configuration at `/etc/config/netguard`. The UCI package name is `netguard`: UCI identifiers cannot contain hyphens.
+
+See the [example configuration](examples/netguard) for two independent lists:
+
+- `list https 'name|IPv4|TLS-host|path|expected_HTTP_code'` — strict HTTPS endpoint response; use `-` in place of a code for transport-only reachability.
+- `list dns 'name|IPv4'` — plain DNS resolver.
+
+Each list replaces its own defaults; an omitted list continues to use built-in targets. Each list is limited to 12 entries. Invalid entries fail explicitly rather than silently falling back to a different target pool.
+
+To **test in RAM without flash writes**, download the sample to `/tmp`:
+
+```sh
+mkdir -p /tmp/netguard-config
+curl -fsSL https://raw.githubusercontent.com/SVTagan/owrt-netguard/main/examples/netguard \
+  -o /tmp/netguard-config/netguard
+OWRT_NETGUARD_CONFIG_DIR=/tmp/netguard-config sh /tmp/owrt-netguard check
+```
+
+**Limitation:** service-provider portals, captive portals and allowlisted sites may remain reachable when general Internet access is restricted. The prototype does **not yet classify limited-access probes**. Do not include them as ordinary HTTP 200 health checks or they could produce a false `HEALTHY_SAMPLED`.
+
+Offline smoke tests: `sh tests/smoke.sh ./owrt-netguard` (15 modeled scenarios, including invalid UCI data).
 
 ## Development direction
 
