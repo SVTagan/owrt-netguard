@@ -48,12 +48,6 @@ wan_dev=$(json_get '@.l3_device')
 wan_phy=$(json_get '@.device')
 [ -n "$wan_phy" ] || wan_phy="$wan_dev"
 
-case "$wan_dev" in
-    *[!a-zA-Z0-9_.:@-]*|'')
-        printf 'ERROR: WAN has no usable l3_device (up=%s)\n' "$wan_up" >&2
-        exit 2 ;;
-esac
-
 carrier=unknown
 if [ -r "/sys/class/net/$wan_phy/carrier" ]; then
     carrier=$(cat "/sys/class/net/$wan_phy/carrier" 2>/dev/null)
@@ -68,11 +62,17 @@ if [ "$carrier" = 0 ]; then
     exit 1
 fi
 
-if [ "$wan_up" != true ]; then
+if [ "$wan_up" != true ] || [ -z "$wan_dev" ]; then
     printf 'RESULT: WAN_NO_L3\n'
-    printf 'NOTE: logical WAN is down; this does not identify the responsible device.\n'
+    printf 'NOTE: logical WAN is down or has no L3 device; the cause is not established.\n'
     exit 1
 fi
+
+case "$wan_dev" in
+    *[!a-zA-Z0-9_.:@-]*)
+        printf 'ERROR: invalid WAN l3_device\n' >&2
+        exit 2 ;;
+esac
 
 # A route lookup sees the unmarked route. It does NOT prove that later nftables
 # output hooks will leave the packet on this path.
@@ -93,13 +93,19 @@ podkop_intercepts() {
 }
 
 https_ok=0
+https_transport=0
+https_unexpected=0
 https_attempted=0
 https_fail=0
 https_skipped=0
 https_http_block=0
 
+# Each HTTPS probe has an explicit response contract. A TLS/HTTP response
+# with a different status shows reachability but NOT endpoint health.
+# expected='-' denotes a transport-only sensor (e.g. the Yandex DNS host,
+# which is known to answer with HTTP 404 at '/').
 probe_https() {
-    name="$1"; ip="$2"; host="$3"; path="$4"
+    name="$1"; ip="$2"; host="$3"; path="$4"; expected="$5"
     if ! route_to_wan "$ip"; then
         printf 'HTTPS %-12s SKIP (no unmarked IPv4 route through %s)\n' "$name" "$wan_dev"
         https_skipped=$((https_skipped + 1))
@@ -118,14 +124,22 @@ probe_https() {
     rc=$?
     if [ "$rc" -eq 0 ]; then
         case "$code" in
-            2??|3??|4??)
-                https_ok=$((https_ok + 1))
-                case "$code" in
-                    403|407|451)
-                        https_http_block=$((https_http_block + 1))
-                        printf 'HTTPS %-12s TLS/HTTP reachable, HTTP %s (access may be restricted)\n' "$name" "$code" ;;
-                    *) printf 'HTTPS %-12s TLS/HTTP reachable, HTTP %s\n' "$name" "$code" ;;
-                esac
+            [1-5][0-9][0-9])
+                https_transport=$((https_transport + 1))
+                if [ "$expected" != "-" ] && [ "$code" = "$expected" ]; then
+                    https_ok=$((https_ok + 1))
+                    printf 'HTTPS %-12s HEALTHY (expected HTTP %s)\n' "$name" "$code"
+                else
+                    if [ "$expected" = "-" ]; then
+                        printf 'HTTPS %-12s TRANSPORT_ONLY (HTTP %s; not counted as healthy)\n' "$name" "$code"
+                    else
+                        https_unexpected=$((https_unexpected + 1))
+                        case "$code" in
+                            403|407|451) https_http_block=$((https_http_block + 1)) ;;
+                        esac
+                        printf 'HTTPS %-12s UNEXPECTED (HTTP %s; expected %s)\n' "$name" "$code" "$expected"
+                    fi
+                fi
                 return ;;
         esac
     fi
@@ -136,15 +150,16 @@ probe_https() {
 printf '\nExternal HTTPS over selected WAN (DNS-independent targets):\n'
 # Fixed IPs are bootstrap probes, not authoritative permanent mappings.
 # --resolve bypasses local DNS while preserving TLS hostname validation.
-probe_https yandex 77.88.8.88 safe.dot.dns.yandex.net /
+# Yandex is transport-only until a stable HTTP success contract is verified.
+probe_https yandex 77.88.8.88 safe.dot.dns.yandex.net / -
 if [ "$https_ok" -lt 2 ]; then
-    probe_https cloudflare 1.1.1.1 one.one.one.one /cdn-cgi/trace
+    probe_https cloudflare 1.1.1.1 one.one.one.one /cdn-cgi/trace 200
 fi
 if [ "$https_ok" -lt 2 ]; then
-    probe_https quad9 9.9.9.9 dns.quad9.net /
+    probe_https quad9 9.9.9.9 dns.quad9.net / 200
 fi
 if [ "$https_ok" -lt 2 ]; then
-    probe_https google 8.8.8.8 dns.google /
+    probe_https google 8.8.8.8 dns.google / 200
 fi
 
 dns_ok=0
@@ -185,22 +200,24 @@ if [ "$dns_ok" -lt 2 ]; then dns_probe cloudflare 1.1.1.1; fi
 if [ "$dns_ok" -lt 2 ]; then dns_probe quad9 9.9.9.9; fi
 if [ "$dns_ok" -lt 2 ]; then dns_probe google 8.8.8.8; fi
 
-printf '\nSummary: HTTPS reachable=%s attempted=%s skipped=%s; external DNS answers=%s failed=%s skipped=%s; local DNS=%s\n' \
-    "$https_ok" "$https_attempted" "$https_skipped" "$dns_ok" "$dns_fail" "$dns_skipped" "$local_dns_ok"
+printf '\nSummary: HTTPS healthy=%s transport=%s unexpected=%s failed=%s skipped=%s; external DNS answers=%s failed=%s skipped=%s; local DNS=%s\n' \
+    "$https_ok" "$https_transport" "$https_unexpected" "$https_fail" "$https_skipped" "$dns_ok" "$dns_fail" "$dns_skipped" "$local_dns_ok"
 
-if [ "$https_ok" -ge 2 ] && [ "$local_dns_ok" -ge 1 ] && [ "$dns_ok" -ge 1 ] && [ "$https_http_block" -eq 0 ]; then
+if [ "$https_ok" -ge 2 ] && [ "$local_dns_ok" -ge 1 ] && [ "$dns_ok" -ge 1 ] && [ "$https_unexpected" -eq 0 ]; then
     result=HEALTHY_SAMPLED
 elif [ "$https_ok" -ge 1 ]; then
     if [ "$local_dns_ok" -eq 0 ] && [ "$dns_ok" -ge 1 ]; then
         result=LOCAL_DNS_UNAVAILABLE
     elif [ "$local_dns_ok" -eq 0 ]; then
         result=DNS_PATH_UNCONFIRMED
+    elif [ "$dns_ok" -eq 0 ]; then
+        result=EXTERNAL_DNS_UNCONFIRMED
     else
         result=PARTIAL_REACHABILITY
     fi
 elif [ "$https_attempted" -eq 0 ]; then
     result=UNKNOWN_ROUTE
-elif [ "$dns_ok" -gt 0 ] || [ "$local_dns_ok" -gt 0 ]; then
+elif [ "$https_transport" -gt 0 ] || [ "$dns_ok" -gt 0 ] || [ "$local_dns_ok" -gt 0 ]; then
     result=PARTIAL_REACHABILITY
 else
     result=EXTERNAL_REACHABILITY_UNCONFIRMED
