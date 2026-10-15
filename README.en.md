@@ -12,9 +12,33 @@ Although the original problem involved Podkop and VPNs, I did not want to build 
 
 ## Status
 
-**This project is in the design stage. No working release or installation procedure is available yet.**
+**An experimental `owrt-netguard check` prototype is now available in the repository. There is no stable release or installer yet.**
 
-The initial implementation will focus on diagnostics and event collection. It will not automatically modify network settings.
+This is a manual, one-shot IPv4 diagnostic tool, not a background monitor. It reads OpenWrt state and performs network probes without restarting services or changing DNS, firewall rules, or routing.
+
+### Try the prototype
+
+On an OpenWrt router with `curl`, download the current source into `/tmp` and run it with a shell:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/SVTagan/owrt-netguard/main/owrt-netguard \
+  -o /tmp/owrt-netguard
+sh /tmp/owrt-netguard check
+```
+
+The temporary file is not installed or enabled at boot. Missing dependencies produce an error; the script does not install anything. To check a different logical WAN:
+
+```sh
+OWRT_NETGUARD_WAN=wan2 sh /tmp/owrt-netguard check
+```
+
+The prototype uses `ubus`, `jsonfilter`, `ip`, `curl`, `nslookup`, `timeout` and standard BusyBox tools. `nft` is optional and is used to identify destinations selected by Podkop's current nft set.
+
+Current features: WAN state, several DNS-independent HTTPS probes using explicitly pinned IPs and TLS validation, plus multiple external DNS resolvers. In healthy conditions it stops after two successful probes of each type; more targets are checked when needed. Example results: `HEALTHY_SAMPLED`, `PARTIAL_REACHABILITY`, `LOCAL_DNS_UNAVAILABLE`, and `DNS_PATH_UNCONFIRMED`.
+
+**Limitations:** IPv4 only. Endpoint reachability and fixed bootstrap addresses have not yet been validated across different networks, including Crimea. Failure of every selected endpoint is not proof of an ISP outage. `--interface` and an unmarked route lookup cannot rule out all nftables/PBR interception. Incident history, notifications and Recovery are not implemented. OpenWrt 25.12 support has not yet been validated on a physical device.
+
+Offline smoke tests: `sh tests/smoke.sh ./owrt-netguard`.
 
 ## Development direction
 
