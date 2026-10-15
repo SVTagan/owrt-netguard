@@ -10,7 +10,7 @@ test -r /tmp/netguard-worker
 test -r /tmp/netguard-state.sh
 test -r /tmp/netguard-init.sh
 
-install -d /usr/lib/netguard /usr/libexec/netguard
+mkdir -p /usr/lib/netguard /usr/libexec/netguard
 cp /tmp/netguard-state.sh /usr/lib/netguard/netguard-state.sh
 cp /tmp/netguard-worker /usr/libexec/netguard/netguard-worker
 
