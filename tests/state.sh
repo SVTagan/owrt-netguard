@@ -101,6 +101,12 @@ feed DNS_PATH_UNCONFIRMED '' OPEN DEGRADED
 feed HEALTHY_SAMPLED '' RECOVERING DEGRADED
 feed HEALTHY_SAMPLED 'RESOLVED 1 DEGRADED' HEALTHY NONE
 
+# An internal check failure must remain UNKNOWN and must not open a WAN incident.
+ng_reset
+feed PROBE_ERROR '' UNKNOWN NONE
+feed PROBE_ERROR '' UNKNOWN NONE
+feed HEALTHY_SAMPLED '' HEALTHY NONE
+
 # Invalid status must be rejected without changing incident state.
 phase_before=$ng_phase
 if ng_step INVALID_RESULT > "$work/event"; then
