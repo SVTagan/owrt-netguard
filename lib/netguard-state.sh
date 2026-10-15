@@ -8,6 +8,7 @@ ng_reset() {
     ng_recovery=0
     ng_incident=0
     ng_root=
+    ng_escalate=0
     ng_last=
 }
 
@@ -29,6 +30,7 @@ ng_step() {
     ng_last=$1
 
     if [ "$ng_family" = HEALTHY ]; then
+        ng_escalate=0
         ng_streak=0
         ng_pending=
         if [ "$ng_phase" = OPEN ] || [ "$ng_phase" = RECOVERING ]; then
@@ -49,19 +51,29 @@ ng_step() {
 
     ng_recovery=0
     if [ "$ng_family" = UNKNOWN ]; then
-        if [ "$ng_phase" = SUSPECT ]; then ng_phase=STARTUP; fi
         ng_streak=0
         ng_pending=
-        if [ "$ng_phase" = RECOVERING ]; then ng_phase=OPEN; fi
+        ng_escalate=0
+        case "$ng_phase" in
+            OPEN|RECOVERING) ng_phase=OPEN ;;
+            *) ng_phase=UNKNOWN ;;
+        esac
         return 0
     fi
 
     if [ "$ng_phase" = OPEN ] || [ "$ng_phase" = RECOVERING ]; then
         ng_phase=OPEN
-        # WAN evidence takes precedence over secondary DNS failures.
+        # A confirmed WAN symptom can supersede DNS, but not after a
+        # single possibly transient reading.
         if [ "$ng_family" = WAN ] && [ "$ng_root" != WAN ]; then
-            ng_root=WAN
-            printf 'RECLASSIFIED %s WAN\n' "$ng_incident"
+            ng_escalate=$((ng_escalate + 1))
+            if [ "$ng_escalate" -ge 2 ]; then
+                ng_root=WAN
+                ng_escalate=0
+                printf 'RECLASSIFIED %s WAN\n' "$ng_incident"
+            fi
+        else
+            ng_escalate=0
         fi
         return 0
     fi
