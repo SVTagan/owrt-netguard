@@ -92,6 +92,116 @@ podkop_intercepts() {
     nft get element inet PodkopTable podkop_subnets "{ $1 }" >/dev/null 2>&1
 }
 
+# UCI config is optional. The file name is 'netguard' (not 'owrt-netguard'):
+# UCI package identifiers cannot contain hyphens.
+default_https='yandex|77.88.8.88|safe.dot.dns.yandex.net|/|-
+cloudflare|1.1.1.1|one.one.one.one|/cdn-cgi/trace|200
+google|8.8.8.8|dns.google|/resolve?name=example.com&type=A|200
+quad9|9.9.9.9|dns.quad9.net|/|-'
+default_dns='yandex|77.88.8.8
+cloudflare|1.1.1.1
+quad9|9.9.9.9
+google|8.8.8.8'
+https_targets="$default_https"
+dns_targets="$default_dns"
+https_source=defaults
+dns_source=defaults
+
+config_dir="${OWRT_NETGUARD_CONFIG_DIR:-/etc/config}"
+if [ -r "$config_dir/netguard" ]; then
+    if ! command -v uci >/dev/null 2>&1; then
+        printf 'ERROR: netguard UCI file exists but uci is unavailable\n' >&2
+        exit 2
+    fi
+    if ! uci -q -c "$config_dir" show netguard >/dev/null 2>&1; then
+        printf 'ERROR: cannot parse UCI config in %s/netguard\n' "$config_dir" >&2
+        exit 2
+    fi
+    custom_https=$(uci -q -c "$config_dir" get netguard.main.https 2>/dev/null)
+    custom_dns=$(uci -q -c "$config_dir" get netguard.main.dns 2>/dev/null)
+    if [ -n "$custom_https" ]; then
+        https_targets="$custom_https"
+        https_source=uci
+    fi
+    if [ -n "$custom_dns" ]; then
+        dns_targets="$custom_dns"
+        dns_source=uci
+    fi
+fi
+
+# UCI list elements are whitespace-separated on 'uci get'. Each element
+# intentionally forbids whitespace and uses a pipe as the field delimiter.
+# Disable pathname expansion so URLs containing '?' or '*' are never globbed.
+set -f
+
+valid_ipv4() {
+    case "$1" in
+        ''|*[!0-9.]* ) return 1 ;;
+    esac
+    old_ifs=$IFS
+    IFS=.
+    set -- $1
+    IFS=$old_ifs
+    [ "$#" -eq 4 ] || return 1
+    for octet in "$@"; do
+        case "$octet" in ''|*[!0-9]* ) return 1 ;; esac
+        [ "$octet" -ge 0 ] 2>/dev/null && [ "$octet" -le 255 ] 2>/dev/null || return 1
+    done
+}
+
+parse_https_target() {
+    old_ifs=$IFS
+    IFS='|'
+    read -r probe_name probe_ip probe_host probe_path probe_expected <<EOF
+$1
+EOF
+    IFS=$old_ifs
+}
+
+parse_dns_target() {
+    old_ifs=$IFS
+    IFS='|'
+    read -r probe_name probe_ip <<EOF
+$1
+EOF
+    IFS=$old_ifs
+}
+
+validate_https_target() {
+    parse_https_target "$1"
+    case "$probe_name" in ''|*[!a-zA-Z0-9_-]*) return 1 ;; esac
+    valid_ipv4 "$probe_ip" || return 1
+    case "$probe_host" in ''|*[!a-zA-Z0-9.-]*|.*|*..*|*.) return 1 ;; esac
+    case "$probe_path" in /*) ;; *) return 1 ;; esac
+    case "$probe_expected" in '-'|[1-5][0-9][0-9]) ;; *) return 1 ;; esac
+}
+
+validate_dns_target() {
+    parse_dns_target "$1"
+    case "$probe_name" in ''|*[!a-zA-Z0-9_-]*) return 1 ;; esac
+    valid_ipv4 "$probe_ip"
+}
+
+https_count=0
+for target in $https_targets; do
+    https_count=$((https_count + 1))
+    if [ "$https_count" -gt 12 ] || ! validate_https_target "$target"; then
+        printf 'ERROR: invalid HTTPS probe entry (max 12): %s\n' "$target" >&2
+        exit 2
+    fi
+done
+dns_count=0
+for target in $dns_targets; do
+    dns_count=$((dns_count + 1))
+    if [ "$dns_count" -gt 12 ] || ! validate_dns_target "$target"; then
+        printf 'ERROR: invalid DNS probe entry (max 12): %s\n' "$target" >&2
+        exit 2
+    fi
+done
+
+printf 'Endpoints: HTTPS=%s (%s), external DNS=%s (%s)\n' \
+    "$https_count" "$https_source" "$dns_count" "$dns_source"
+
 https_ok=0
 https_transport=0
 https_unexpected=0
@@ -151,17 +261,11 @@ printf '\nExternal HTTPS over selected WAN (DNS-independent targets):\n'
 # Fixed IPs are bootstrap probes, not authoritative permanent mappings.
 # --resolve bypasses local DNS while preserving TLS hostname validation.
 # Yandex is transport-only until a stable HTTP success contract is verified.
-probe_https yandex 77.88.8.88 safe.dot.dns.yandex.net / -
-if [ "$https_ok" -lt 2 ]; then
-    probe_https cloudflare 1.1.1.1 one.one.one.one /cdn-cgi/trace 200
-fi
-if [ "$https_ok" -lt 2 ]; then
-    probe_https google 8.8.8.8 dns.google '/resolve?name=example.com&type=A' 200
-fi
-if [ "$https_ok" -lt 2 ]; then
-    # Quad9 documents /dns-query as a DoH endpoint, not '/' as an HTTP 200 health check.
-    probe_https quad9 9.9.9.9 dns.quad9.net / -
-fi
+for target in $https_targets; do
+    parse_https_target "$target"
+    probe_https "$probe_name" "$probe_ip" "$probe_host" "$probe_path" "$probe_expected"
+    [ "$https_ok" -ge 2 ] && break
+done
 
 dns_ok=0
 dns_fail=0
@@ -196,10 +300,11 @@ printf '\nExternal DNS resolvers (plaintext UDP, may be filtered or intercepted)
 dns_ok=0
 dns_fail=0
 dns_skipped=0
-dns_probe yandex 77.88.8.8
-if [ "$dns_ok" -lt 2 ]; then dns_probe cloudflare 1.1.1.1; fi
-if [ "$dns_ok" -lt 2 ]; then dns_probe quad9 9.9.9.9; fi
-if [ "$dns_ok" -lt 2 ]; then dns_probe google 8.8.8.8; fi
+for target in $dns_targets; do
+    parse_dns_target "$target"
+    dns_probe "$probe_name" "$probe_ip"
+    [ "$dns_ok" -ge 2 ] && break
+done
 
 printf '\nSummary: HTTPS healthy=%s transport=%s unexpected=%s restricted=%s failed=%s skipped=%s; external DNS answers=%s failed=%s skipped=%s; local DNS=%s\n' \
     "$https_ok" "$https_transport" "$https_unexpected" "$https_http_block" "$https_fail" "$https_skipped" "$dns_ok" "$dns_fail" "$dns_skipped" "$local_dns_ok"
