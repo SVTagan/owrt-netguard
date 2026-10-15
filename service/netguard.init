@@ -1,0 +1,53 @@
+#!/bin/sh /etc/rc.common
+# Experimental procd integration, NOT an installer.
+# Until monitor_enabled=1, manually calling 'start' does nothing.
+START=95
+STOP=05
+USE_PROCD=1
+
+start_service() {
+    local active interval wan
+    config_load netguard
+    config_get_bool active main monitor_enabled 0
+    [ "$active" -eq 1 ] || return 0
+
+    config_get interval main interval 30
+    case "$interval" in
+        ''|*[!0-9]*)
+            echo 'NetGuard: invalid interval' >&2
+            return 1 ;;
+    esac
+    [ "$interval" -ge 10 ] 2>/dev/null &&
+        [ "$interval" -le 3600 ] 2>/dev/null || {
+        echo 'NetGuard: interval must be 10..3600 seconds' >&2
+        return 1
+    }
+
+    [ -r /usr/bin/owrt-netguard ] &&
+        [ -r /usr/lib/netguard/netguard-state.sh ] &&
+        [ -r /usr/libexec/netguard/netguard-worker ] || {
+        echo 'NetGuard: required files are missing' >&2
+        return 1
+    }
+
+    config_get wan main wan wan
+    case "$wan" in
+        ''|*[!a-zA-Z0-9_.-]*)
+            echo 'NetGuard: invalid logical WAN name' >&2
+            return 1 ;;
+    esac
+
+    procd_open_instance
+    procd_set_param command /bin/sh /usr/libexec/netguard/netguard-worker --forever "$interval"
+    procd_set_param env "OWRT_NETGUARD_WAN=$wan"
+    procd_set_param file /etc/config/netguard
+    # Prevent an endless rapid-restart loop if dependencies are absent.
+    procd_set_param respawn 3600 10 3
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
+
+service_triggers() {
+    procd_add_reload_trigger netguard
+}
