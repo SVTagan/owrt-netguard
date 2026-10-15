@@ -66,6 +66,12 @@ OWRT_NETGUARD_CONFIG_DIR=/tmp/netguard-config sh /tmp/owrt-netguard check
 
 Offline smoke tests: `sh tests/smoke.sh ./owrt-netguard` (15 modeled scenarios, including invalid UCI data).
 
+### Experimental incident correlation
+
+A separate [shell state library](lib/netguard-state.sh) accepts normalized `check` results and determines when an incident opens, changes classification, and resolves. Provisional thresholds are three consecutive failures of the same class and two confirmed healthy observations. DNS symptoms do not open a second incident while a WAN incident is active. An unknown result does not count as recovery.
+
+This is an **isolated in-memory prototype**, not yet connected to `check` or any background service. It has no flash journal, outage timing, or reboot persistence. Offline sequence tests: `sh tests/state.sh ./lib/netguard-state.sh`. Committing tests does not mean they have passed on OpenWrt.
+
 ## Development direction
 
 ### Monitoring and diagnostics
