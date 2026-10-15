@@ -1,0 +1,217 @@
+#!/bin/sh
+# OWRT NetGuard — on-demand diagnostic prototype.
+# Read-only: no service control, UCI writes, firewall or route modifications.
+
+set -u
+
+usage() {
+    cat <<'USAGE'
+Usage: sh owrt-netguard check
+
+Read-only IPv4 checks of WAN state, HTTPS endpoints and DNS resolvers.
+Environment: OWRT_NETGUARD_WAN=wan (logical OpenWrt interface).
+This is a diagnostic prototype, not a background monitor.
+USAGE
+}
+
+case "${1:-}" in
+    check) [ "$#" -eq 1 ] || { usage >&2; exit 2; } ;;
+    help|-h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+esac
+
+for utility in ubus jsonfilter ip curl nslookup timeout grep; do
+    if ! command -v "$utility" >/dev/null 2>&1; then
+        printf 'ERROR: missing command: %s\n' "$utility" >&2
+        exit 2
+    fi
+done
+
+wan="${OWRT_NETGUARD_WAN:-wan}"
+case "$wan" in
+    *[!a-zA-Z0-9_.-]*|'')
+        printf 'ERROR: unsafe logical WAN interface name\n' >&2
+        exit 2 ;;
+esac
+
+json=$(ubus call "network.interface.$wan" status 2>/dev/null) || {
+    printf 'ERROR: cannot read network.interface.%s from ubus\n' "$wan" >&2
+    exit 2
+}
+
+json_get() {
+    printf '%s\n' "$json" | jsonfilter -e "$1" 2>/dev/null | head -n 1
+}
+
+wan_up=$(json_get '@.up')
+wan_dev=$(json_get '@.l3_device')
+wan_phy=$(json_get '@.device')
+[ -n "$wan_phy" ] || wan_phy="$wan_dev"
+
+case "$wan_dev" in
+    *[!a-zA-Z0-9_.:@-]*|'')
+        printf 'ERROR: WAN has no usable l3_device (up=%s)\n' "$wan_up" >&2
+        exit 2 ;;
+esac
+
+carrier=unknown
+if [ -r "/sys/class/net/$wan_phy/carrier" ]; then
+    carrier=$(cat "/sys/class/net/$wan_phy/carrier" 2>/dev/null)
+fi
+
+printf 'OWRT NetGuard — diagnostic prototype (read-only)\n'
+printf 'WAN: logical=%s device=%s l3_device=%s up=%s carrier=%s\n' "$wan" "$wan_phy" "$wan_dev" "$wan_up" "$carrier"
+
+if [ "$carrier" = 0 ]; then
+    printf 'RESULT: WAN_LINK_DOWN\n'
+    printf 'NOTE: physical link lost; cause (local cable/port/upstream) unknown.\n'
+    exit 1
+fi
+
+if [ "$wan_up" != true ]; then
+    printf 'RESULT: WAN_NO_L3\n'
+    printf 'NOTE: logical WAN is down; this does not identify the responsible device.\n'
+    exit 1
+fi
+
+# A route lookup sees the unmarked route. It does NOT prove that later nftables
+# output hooks will leave the packet on this path.
+route_to_wan() {
+    route=$(ip -4 route get "$1" 2>/dev/null) || return 1
+    case " $route " in
+        *" dev $wan_dev "*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Avoid a destination that belongs to Podkop's current output nft set.
+# This optional guard does not require Podkop to be installed.
+podkop_intercepts() {
+    command -v nft >/dev/null 2>&1 || return 1
+    nft list set inet PodkopTable podkop_subnets >/dev/null 2>&1 || return 1
+    nft get element inet PodkopTable podkop_subnets "{ $1 }" >/dev/null 2>&1
+}
+
+https_ok=0
+https_attempted=0
+https_fail=0
+https_skipped=0
+https_http_block=0
+
+probe_https() {
+    name="$1"; ip="$2"; host="$3"; path="$4"
+    if ! route_to_wan "$ip"; then
+        printf 'HTTPS %-12s SKIP (no unmarked IPv4 route through %s)\n' "$name" "$wan_dev"
+        https_skipped=$((https_skipped + 1))
+        return
+    fi
+    if podkop_intercepts "$ip"; then
+        printf 'HTTPS %-12s SKIP (destination selected by Podkop nft set)\n' "$name"
+        https_skipped=$((https_skipped + 1))
+        return
+    fi
+    https_attempted=$((https_attempted + 1))
+    code=$(curl -4 --noproxy '*' --interface "$wan_dev" \
+        --resolve "$host:443:$ip" --connect-timeout 3 --max-time 6 \
+        -sS -o /dev/null -w '%{http_code}' \
+        "https://$host$path" 2>/dev/null)
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+        case "$code" in
+            2??|3??|4??)
+                https_ok=$((https_ok + 1))
+                case "$code" in
+                    403|407|451)
+                        https_http_block=$((https_http_block + 1))
+                        printf 'HTTPS %-12s TLS/HTTP reachable, HTTP %s (access may be restricted)\n' "$name" "$code" ;;
+                    *) printf 'HTTPS %-12s TLS/HTTP reachable, HTTP %s\n' "$name" "$code" ;;
+                esac
+                return ;;
+        esac
+    fi
+    https_fail=$((https_fail + 1))
+    printf 'HTTPS %-12s FAIL (curl exit=%s, HTTP=%s)\n' "$name" "$rc" "$code"
+}
+
+printf '\nExternal HTTPS over selected WAN (DNS-independent targets):\n'
+# Fixed IPs are bootstrap probes, not authoritative permanent mappings.
+# --resolve bypasses local DNS while preserving TLS hostname validation.
+probe_https yandex 77.88.8.88 safe.dot.dns.yandex.net /
+if [ "$https_ok" -lt 2 ]; then
+    probe_https cloudflare 1.1.1.1 one.one.one.one /cdn-cgi/trace
+fi
+if [ "$https_ok" -lt 2 ]; then
+    probe_https quad9 9.9.9.9 dns.quad9.net /
+fi
+if [ "$https_ok" -lt 2 ]; then
+    probe_https google 8.8.8.8 dns.google /
+fi
+
+dns_ok=0
+dns_fail=0
+dns_skipped=0
+
+dns_probe() {
+    label="$1"; server="$2"
+    if [ "$server" != 127.0.0.1 ]; then
+        if ! route_to_wan "$server" || podkop_intercepts "$server"; then
+            printf 'DNS   %-12s SKIP (direct WAN path not established)\n' "$label"
+            dns_skipped=$((dns_skipped + 1))
+            return
+        fi
+    fi
+    # A resolver banner alone is not a successful answer.
+    answer=$(timeout 4 nslookup example.com "$server" 2>/dev/null)
+    rc=$?
+    if [ "$rc" -eq 0 ] && printf '%s\n' "$answer" | grep -q '^Name:'; then
+        dns_ok=$((dns_ok + 1))
+        printf 'DNS   %-12s ANSWER\n' "$label"
+    else
+        dns_fail=$((dns_fail + 1))
+        printf 'DNS   %-12s FAIL (exit=%s)\n' "$label" "$rc"
+    fi
+}
+
+printf '\nLocal DNS:\n'
+dns_probe local 127.0.0.1
+local_dns_ok=$dns_ok
+
+printf '\nExternal DNS resolvers (plaintext UDP, may be filtered or intercepted):\n'
+dns_ok=0
+dns_fail=0
+dns_skipped=0
+dns_probe yandex 77.88.8.8
+if [ "$dns_ok" -lt 2 ]; then dns_probe cloudflare 1.1.1.1; fi
+if [ "$dns_ok" -lt 2 ]; then dns_probe quad9 9.9.9.9; fi
+if [ "$dns_ok" -lt 2 ]; then dns_probe google 8.8.8.8; fi
+
+printf '\nSummary: HTTPS reachable=%s attempted=%s skipped=%s; external DNS answers=%s failed=%s skipped=%s; local DNS=%s\n' \
+    "$https_ok" "$https_attempted" "$https_skipped" "$dns_ok" "$dns_fail" "$dns_skipped" "$local_dns_ok"
+
+if [ "$https_ok" -ge 2 ] && [ "$local_dns_ok" -ge 1 ] && [ "$dns_ok" -ge 1 ] && [ "$https_http_block" -eq 0 ]; then
+    result=HEALTHY_SAMPLED
+elif [ "$https_ok" -ge 1 ]; then
+    if [ "$local_dns_ok" -eq 0 ] && [ "$dns_ok" -ge 1 ]; then
+        result=LOCAL_DNS_UNAVAILABLE
+    elif [ "$local_dns_ok" -eq 0 ]; then
+        result=DNS_PATH_UNCONFIRMED
+    else
+        result=PARTIAL_REACHABILITY
+    fi
+elif [ "$https_attempted" -eq 0 ]; then
+    result=UNKNOWN_ROUTE
+elif [ "$dns_ok" -gt 0 ] || [ "$local_dns_ok" -gt 0 ]; then
+    result=PARTIAL_REACHABILITY
+else
+    result=EXTERNAL_REACHABILITY_UNCONFIRMED
+fi
+
+printf 'RESULT: %s\n' "$result"
+printf 'NOTE: failure of selected endpoints does not prove an ISP outage; filtering or local routing may be involved.\n'
+printf 'NOTE: interface binding and unmarked route lookup do not prove absence of other nftables/PBR interception.\n'
+printf 'NOTE: this prototype checks IPv4 only; IPv6 reachability is not assessed.\n'
+
+case "$result" in
+    HEALTHY_SAMPLED) exit 0 ;;
+    *) exit 1 ;;
+esac
