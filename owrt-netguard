@@ -156,10 +156,11 @@ if [ "$https_ok" -lt 2 ]; then
     probe_https cloudflare 1.1.1.1 one.one.one.one /cdn-cgi/trace 200
 fi
 if [ "$https_ok" -lt 2 ]; then
-    probe_https quad9 9.9.9.9 dns.quad9.net / 200
+    probe_https google 8.8.8.8 dns.google '/resolve?name=example.com&type=A' 200
 fi
 if [ "$https_ok" -lt 2 ]; then
-    probe_https google 8.8.8.8 dns.google / 200
+    # Quad9 documents /dns-query as a DoH endpoint, not '/' as an HTTP 200 health check.
+    probe_https quad9 9.9.9.9 dns.quad9.net / -
 fi
 
 dns_ok=0
