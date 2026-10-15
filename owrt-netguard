@@ -200,10 +200,12 @@ if [ "$dns_ok" -lt 2 ]; then dns_probe cloudflare 1.1.1.1; fi
 if [ "$dns_ok" -lt 2 ]; then dns_probe quad9 9.9.9.9; fi
 if [ "$dns_ok" -lt 2 ]; then dns_probe google 8.8.8.8; fi
 
-printf '\nSummary: HTTPS healthy=%s transport=%s unexpected=%s failed=%s skipped=%s; external DNS answers=%s failed=%s skipped=%s; local DNS=%s\n' \
-    "$https_ok" "$https_transport" "$https_unexpected" "$https_fail" "$https_skipped" "$dns_ok" "$dns_fail" "$dns_skipped" "$local_dns_ok"
+printf '\nSummary: HTTPS healthy=%s transport=%s unexpected=%s restricted=%s failed=%s skipped=%s; external DNS answers=%s failed=%s skipped=%s; local DNS=%s\n' \
+    "$https_ok" "$https_transport" "$https_unexpected" "$https_http_block" "$https_fail" "$https_skipped" "$dns_ok" "$dns_fail" "$dns_skipped" "$local_dns_ok"
 
-if [ "$https_ok" -ge 2 ] && [ "$local_dns_ok" -ge 1 ] && [ "$dns_ok" -ge 1 ] && [ "$https_unexpected" -eq 0 ]; then
+if [ "$https_ok" -ge 2 ] && [ "$local_dns_ok" -ge 1 ] && [ "$dns_ok" -ge 1 ] && \
+    [ "$https_unexpected" -eq 0 ] && [ "$https_fail" -eq 0 ] && [ "$dns_fail" -eq 0 ] && \
+    [ "$https_skipped" -eq 0 ] && [ "$dns_skipped" -eq 0 ]; then
     result=HEALTHY_SAMPLED
 elif [ "$https_ok" -ge 1 ]; then
     if [ "$local_dns_ok" -eq 0 ] && [ "$dns_ok" -ge 1 ]; then
