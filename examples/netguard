@@ -16,6 +16,11 @@
 # their special diagnostic role is not implemented in this prototype.
 
 config netguard 'main'
+    # Background service is opt-in even when its init script is installed.
+    option monitor_enabled '0'
+    option interval '30'
+    option wan 'wan'
+
     list https 'yandex|77.88.8.88|safe.dot.dns.yandex.net|/|-'
     list https 'cloudflare|1.1.1.1|one.one.one.one|/cdn-cgi/trace|200'
     list https 'google|8.8.8.8|dns.google|/resolve?name=example.com&type=A|200'
