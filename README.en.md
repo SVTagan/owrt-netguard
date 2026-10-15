@@ -34,9 +34,13 @@ OWRT_NETGUARD_WAN=wan2 sh /tmp/owrt-netguard check
 
 The prototype uses `ubus`, `jsonfilter`, `ip`, `curl`, `nslookup` with built-in timeout/retry options (`-timeout`/`-retry`) and standard BusyBox tools. `nft` is optional and is used to identify destinations selected by Podkop's current nft set.
 
-Current features: WAN state, several DNS-independent HTTPS probes using explicitly pinned IPs and TLS validation, plus multiple external DNS resolvers. In healthy conditions it stops after two successful probes of each type; more targets are checked when needed. Example results: `HEALTHY_SAMPLED`, `PARTIAL_REACHABILITY`, `LOCAL_DNS_UNAVAILABLE`, and `DNS_PATH_UNCONFIRMED`.
+Current features: WAN state, several HTTPS probes using explicitly pinned IPs and TLS validation, plus multiple external DNS resolvers. **TLS/HTTP server reachability and a healthy endpoint response are distinct**: for example, Yandex returning HTTP 404 confirms a server response but is not counted as a healthy endpoint. Cloudflare, Quad9 and Google currently expect HTTP 200. Additional HTTPS checks stop after two valid health responses, and DNS checks after two answers. More targets are checked when needed.
 
-**Limitations:** IPv4 only. Endpoint reachability and fixed bootstrap addresses have not yet been validated across different networks, including Crimea. Failure of every selected endpoint is not proof of an ISP outage. `--interface` and an unmarked route lookup cannot rule out all nftables/PBR interception. Incident history, notifications and Recovery are not implemented. OpenWrt 25.12 support has not yet been validated on a physical device.
+Statuses include `HEALTHY_SAMPLED` (only the sampled paths, not the entire Internet), `PARTIAL_REACHABILITY`, `WAN_NO_L3`, `LOCAL_DNS_UNAVAILABLE`, `EXTERNAL_DNS_UNCONFIRMED`, `DNS_PATH_UNCONFIRMED` and `UNKNOWN_ROUTE`. Failed or skipped probes prevent an unconditional healthy result.
+
+**Limitations:** IPv4 only. The endpoint list is currently hard-coded; user-controlled UCI configuration is planned. Endpoint reachability in Crimea and other networks remains unverified. Failure of all selected endpoints does not prove an ISP outage. `--interface` and an unmarked route lookup cannot rule out all nftables/PBR interception, and external `nslookup` traffic is not strictly bound to WAN. Incident history, notifications and Recovery are not implemented. The **previous** prototype ran successfully on a physical AX6000 with OpenWrt 24.10.5; these latest changes still require retesting.
+
+An [OpenWrt 25.12.5 QEMU test harness](tests/ci/README.md) has been prepared for manual GitHub Actions runs, but has not been activated or executed. No physical OpenWrt 25.12 hardware test has taken place.
 
 Offline smoke tests: `sh tests/smoke.sh ./owrt-netguard`.
 
@@ -76,7 +80,7 @@ Target OpenWrt releases for development and validation:
 
 The intended implementation is lightweight and based on standard OpenWrt mechanisms, without mandatory heavyweight runtime dependencies.
 
-These are **compatibility targets, not claims of tested support**. No executable release is available yet.
+These are **compatibility targets, not claims of fully tested support**. An experimental script is available, but no stable release has been published. An earlier revision ran on OpenWrt 24.10.5 hardware; OpenWrt 25.12 has not yet been verified in QEMU or on hardware.
 
 ## Design principles
 
