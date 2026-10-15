@@ -2,9 +2,13 @@
 
 [Русский](README.md)
 
-An independent OpenWrt project focused on diagnosing network connectivity and identifying where an Internet outage occurs. Its long-term direction is safe recovery from failures of individual network components.
+A small, independent OpenWrt project I started planning to better understand why an Internet connection fails and where the problem actually lies.
 
-The goal is not merely to report that the Internet is unavailable, but to help distinguish WAN and upstream connectivity failures from local DNS, routing, VPN, and other service problems.
+The idea came from a recurring problem on my own routers: the Internet would go down, and [Podkop](https://github.com/itdoginfo/podkop) diagnostics would report DNS errors. In several cases, the real issue turned out to be upstream at the ISP. Similar symptoms, however, can also come from the router itself, DNS, routing, or a VPN. A single service's error message does not always tell you where to start looking.
+
+OpenWrt already has tools for connectivity checks, statistics, and connection recovery. They serve their own purposes, but I wanted something slightly different: a way to correlate checks across network layers, distinguish root causes from secondary symptoms, and retain an incident history. That is how the idea for NetGuard emerged.
+
+Although the original problem involved Podkop and VPNs, I did not want to build another Podkop-specific tool. NetGuard is intended to be a standalone monitor for different OpenWrt setups, with room for carefully controlled recovery features later.
 
 ## Status
 
