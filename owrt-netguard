@@ -86,9 +86,19 @@ route_to_wan() {
 
 # Avoid a destination that belongs to Podkop's current output nft set.
 # This optional guard does not require Podkop to be installed.
+# Check the optional set once per run rather than spawning 'nft list set'
+# before every HTTPS and DNS probe.
+podkop_set_state=unknown
 podkop_intercepts() {
-    command -v nft >/dev/null 2>&1 || return 1
-    nft list set inet PodkopTable podkop_subnets >/dev/null 2>&1 || return 1
+    if [ "$podkop_set_state" = unknown ]; then
+        if command -v nft >/dev/null 2>&1 && \
+            nft list set inet PodkopTable podkop_subnets >/dev/null 2>&1; then
+            podkop_set_state=present
+        else
+            podkop_set_state=absent
+        fi
+    fi
+    [ "$podkop_set_state" = present ] || return 1
     nft get element inet PodkopTable podkop_subnets "{ $1 }" >/dev/null 2>&1
 }
 
