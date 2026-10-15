@@ -103,7 +103,7 @@ run() {
             printf '%s\n' "$output" | grep -q 'HTTPS healthy=2' || exit 1 ;;
         one_good)
             printf '%s\n' "$output" | grep -q 'HTTPS healthy=1' || exit 1
-            printf '%s\n' "$output" | grep -q 'HTTPS quad9.*UNEXPECTED (HTTP 404' || exit 1 ;;
+            printf '%s\n' "$output" | grep -q 'HTTPS google.*UNEXPECTED (HTTP 451' || exit 1 ;;
     esac
 
     if [ "$expected" = HEALTHY_SAMPLED ]; then expected_rc=0; else expected_rc=1; fi
