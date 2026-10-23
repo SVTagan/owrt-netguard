@@ -57,7 +57,7 @@ done
     [ "$noproxy" = '*' ] && [ "$maxsize" = 131072 ] || exit 85
 [ -n "$url" ] || exit 86
 case "$url" in
-    'https://ya.ru/') printf '200|77.88.8.88|0|0.234|1024' ;;
+    https://ya.ru/*) printf '200|77.88.8.88|0|0.234|1024' ;;
     'https://mail.ru/') printf '301|94.100.180.200|0|0.345|0' ;;
     'https://www.reg.ru/') printf '200|203.0.113.10|0|0.123|500' ;;
     'https://www.nic.ru/') printf '200|195.253.225.12|0|0.211|500' ;;
@@ -104,6 +104,18 @@ grep -qx 'SUMMARY: targets=3 matched=2 redirects=0 body_limit=0 other_failures=1
 printf '%s\n' 'ru_base|only_ya|https://ya.ru/|2xx|-' > "$work/custom"
 run --file "$work/custom"
 grep -qx 'SUMMARY: targets=1 matched=1 redirects=0 body_limit=0 other_failures=0' "$work/output"
+
+# URLs with '&' must pass validation without being interpreted by ash.
+printf '%s\n' 'ru_base|query|https://ya.ru/?a=1&b=2|2xx|-' > "$work/custom"
+run --file "$work/custom"
+grep -qx 'SUMMARY: targets=1 matched=1 redirects=0 body_limit=0 other_failures=0' "$work/output"
+
+# Shell metacharacters outside the allowlist must not be accepted.
+printf '%s\n' 'ru_base|unsafe|https://ya.ru/;something|any|-' > "$work/custom"
+if PATH="$work/mock:$PATH" sh "$script" --file "$work/custom" >"$work/output" 2>&1; then
+    echo 'FAIL: shell metacharacter URL accepted' >&2
+    exit 1
+fi
 
 printf '%s\n' 'ru_base|bad|http://insecure.invalid/|any|-' > "$work/custom"
 if PATH="$work/mock:$PATH" sh "$script" --file "$work/custom" >"$work/output" 2>&1; then
