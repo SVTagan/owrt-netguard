@@ -38,9 +38,9 @@ Current features: WAN state, several HTTPS probes using explicitly pinned IPs an
 
 Statuses include `HEALTHY_SAMPLED` (only the sampled paths), `WAN_INITIALIZING` (netifd is configuring WAN), `WAN_NO_L3`, `PARTIAL_REACHABILITY`, `LOCAL_DNS_UNAVAILABLE`, `EXTERNAL_DNS_UNCONFIRMED`, `DNS_PATH_UNCONFIRMED` and `UNKNOWN_ROUTE`. Failed or skipped probes prevent an unconditional healthy result.
 
-**Limitations:** IPv4 only; HTTPS/DNS endpoints can already be configured through UCI. Failure of all selected endpoints does not prove an ISP outage or a payment-related restriction. Captive-portal classification is not yet implemented. `curl --interface`, pinned IPs and unmarked routing do not prove bypass of nftables/PBR, and external DNS probes are not strictly WAN-bound. Incident history, notifications and Recovery are not implemented. Previous hardware tests passed on AX6000/OpenWrt 24.10.5; the latest startup changes have not yet been field-tested.
+**Limitations:** IPv4 only; HTTPS/DNS endpoints can already be configured through UCI. Failure of all selected endpoints does not prove an ISP outage or a payment-related restriction. Captive-portal classification is not yet implemented. `curl --interface`, pinned IPs and unmarked routing do not prove bypass of nftables/PBR, and external DNS probes are not strictly WAN-bound. Incident history, notifications and Recovery are not implemented. Previous hardware tests passed on AX6000/OpenWrt 24.10.5; the startup changes passed a three-cycle bounded worker field test on AX6000/OpenWrt 24.10.5.
 
-The manual [OpenWrt 25.12.5 QEMU workflow](tests/ci/README.md) is active. Both [run #1](https://github.com/SVTagan/owrt-netguard/actions/runs/38820425380) and [run #2](https://github.com/SVTagan/owrt-netguard/actions/runs/39973225284) passed. The second run covered **16 smoke cases, 55 state transitions, startup grace in the worker and the real procd lifecycle**. The latest changes have not yet been field-tested on the AX6000; no physical OpenWrt 25.12 hardware test has taken place.
+The manual [OpenWrt 25.12.5 QEMU workflow](tests/ci/README.md) is active. [Run #1](https://github.com/SVTagan/owrt-netguard/actions/runs/38820425380), [run #2](https://github.com/SVTagan/owrt-netguard/actions/runs/39973225284), and [run #3](https://github.com/SVTagan/owrt-netguard/actions/runs/39990869415) passed. Run #3 covered 16 smoke cases, 55 state transitions, worker, real procd lifecycle, WAN path audit, endpoint survey, and **actual OpenWrt UCI** profile validation. The updated worker already passed a bounded AX6000 field check, but the new profile loader has not; no physical OpenWrt 25.12 hardware test has taken place.
 
 ### Custom probe targets (optional)
 
@@ -83,7 +83,7 @@ sh /tmp/netguard-monitor 3 10
 
 The monitor requires an explicit number of cycles (1–30). The interval defaults to 30 seconds. Output includes `SAMPLE`, `STATE` and transition events `OPEN`, `RECLASSIFIED` and `RESOLVED`. Diagnostic command errors become `PROBE_ERROR` instead of being mistaken for proven network outages. Incident state exists **only within the running process**.
 
-Tests: `sh tests/state.sh ./lib/netguard-state.sh` and `sh tests/monitor.sh ./netguard-monitor ./lib/netguard-state.sh`. The state library passed **43 transitions** on a physical AX6000 with OpenWrt 24.10.5. The integrated manual monitor subsequently completed **three consecutive** `HEALTHY_SAMPLED → HEALTHY` cycles and exited cleanly. Failure cases have only been checked with simulated data, not by deliberately disconnecting WAN. The updated WAN initialization logic passed [QEMU/OpenWrt 25.12.5 run #2](https://github.com/SVTagan/owrt-netguard/actions/runs/39973225284) but has not yet been field-tested on the AX6000.
+Tests: `sh tests/state.sh ./lib/netguard-state.sh` and `sh tests/monitor.sh ./netguard-monitor ./lib/netguard-state.sh`. The state library passed **43 transitions** on a physical AX6000 with OpenWrt 24.10.5. The integrated manual monitor subsequently completed **three consecutive** `HEALTHY_SAMPLED → HEALTHY` cycles and exited cleanly. Failure cases have only been checked with simulated data, not by deliberately disconnecting WAN. The updated WAN initialization logic passed [QEMU/OpenWrt 25.12.5 run #2](https://github.com/SVTagan/owrt-netguard/actions/runs/39973225284) and subsequently passed a bounded three-cycle AX6000 field test under healthy WAN conditions.
 
 ### Experimental service layer (do not install yet)
 
@@ -112,7 +112,7 @@ Explicit profiles: `russia` (two research RU candidates: Selectel and Timeweb), 
 
 The [`examples/netguard-profiles.preview`](examples/netguard-profiles.preview) UCI sample is **for inspection in /tmp only**. Do not install it in `/etc/config/netguard`: the main diagnostic engine does not yet consume profile fields and would continue using legacy defaults. With no selected profile, inspection reports `LEGACY_UNCHANGED`. See [`docs/endpoint-profiles.md`](docs/endpoint-profiles.md) for the design contract.
 
-Local offline [`tests/profiles.sh`](tests/profiles.sh) cases passed under BusyBox `ash` 1.37, `dash` and `bash`. The suite is wired into manual QEMU CI, but **has not yet run there**. The new loader has not been field-tested on the AX6000.
+Local offline [`tests/profiles.sh`](tests/profiles.sh) cases passed under BusyBox `ash` 1.37, `dash` and `bash`. The suite also **passed QEMU run #3**, including real OpenWrt UCI parsing. The new loader has not been field-tested on the AX6000.
 
 ### Exploratory regional endpoint survey
 
@@ -130,7 +130,7 @@ The script uses IPv4, `curl --interface if!<wan-device> --noproxy '*'` with TLS 
 
 For custom research targets, use `--file /tmp/targets` with lines in `group|name|https://host/path|expected_http|expected_body` format. Groups are `ru_base`, `ru_diverse`, `international`; HTTP expectations are `200`, `204`, `2xx`, `any`; use `-` for no body token. There is a 16-target maximum. The tool never modifies the file. Proposed production UCI profiles `Russia`/`International`/`Custom` are **not yet implemented**.
 
-This one-shot tool does not start services, change DNS, UCI, firewall rules or routes, or write persistent logs. It sends HTTPS GET requests to the listed public sites and uses a temporary RAM file for expected response-token checks. The deterministic `sh tests/endpoint-survey.sh ./netguard-endpoint-survey` suite **passed locally** under BusyBox `ash` 1.37, `dash` and `bash` using the cleaned [commit `476eb67`](https://github.com/SVTagan/owrt-netguard/commit/476eb67420188034818d303bbdd7e6df7a0734c4). Earlier revisions contained duplicated tail blocks that caused syntax errors; do not use those old pinned commits. The test is wired into the manual OpenWrt 25.12 QEMU workflow but **has not yet been rerun there**, nor has the corrected survey been retested on physical AX6000 hardware.
+This one-shot tool does not start services, change DNS, UCI, firewall rules or routes, or write persistent logs. It sends HTTPS GET requests to the listed public sites and uses a temporary RAM file for expected response-token checks. The deterministic `sh tests/endpoint-survey.sh ./netguard-endpoint-survey` suite **passed locally** under BusyBox `ash` 1.37, `dash` and `bash` using the cleaned [commit `476eb67`](https://github.com/SVTagan/owrt-netguard/commit/476eb67420188034818d303bbdd7e6df7a0734c4). Earlier revisions contained duplicated tail blocks that caused syntax errors; do not use those old pinned commits. The corrected survey **passed QEMU run #3 and direct real-target field trials on AX6000**; results reflect only that ISP path and do not guarantee general availability across Russia.
 
 ### Experimental WAN path audit
 
@@ -146,7 +146,7 @@ The default destination is `1.1.1.1` (one current HTTPS diagnostic IP); another 
 
 `PATH_AUDIT: ROUTE_MATCH_ONLY` does **not** mean the actual WAN path was conclusively verified. Netfilter OUTPUT, policy routing and other mechanisms can change packet handling after an ordinary route lookup. `ROUTE_MISMATCH` means the unmarked route chose another interface; `INSUFFICIENT_EVIDENCE` means not enough information is available. The audit makes no network requests and never attributes an outage to the ISP on this evidence alone.
 
-The command is **not invoked by the recurring worker** and does not continuously poll nftables. Its deterministic `sh tests/path-audit.sh ./netguard-path-audit` test is included in the manual QEMU workflow but **has not yet been run there**.
+The command is **not invoked by the recurring worker** and does not continuously poll nftables. Its deterministic `sh tests/path-audit.sh ./netguard-path-audit` test **passed QEMU run #3**; a manual read-only audit was also run on AX6000.
 
 ## Development direction
 
@@ -184,7 +184,7 @@ Target OpenWrt releases for development and validation:
 
 The intended implementation is lightweight and based on standard OpenWrt mechanisms, without mandatory heavyweight runtime dependencies.
 
-These are **compatibility targets, not claims of fully tested support**. Physical AX6000/OpenWrt 24.10.5 checks and a QEMU/OpenWrt 25.12.5 procd lifecycle run previously passed. The startup changes passed the second QEMU regression, but have not yet been tested on the AX6000; physical OpenWrt 25.12 remains untested.
+These are **compatibility targets, not claims of fully tested support**. Physical AX6000/OpenWrt 24.10.5 checks and a QEMU/OpenWrt 25.12.5 procd lifecycle run previously passed. The startup changes passed the QEMU regression and a bounded AX6000 field test; physical OpenWrt 25.12 remains untested.
 
 ## Design principles
 
