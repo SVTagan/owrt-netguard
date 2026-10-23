@@ -1,6 +1,6 @@
 # Endpoint profiles — design contract (draft)
 
-Status: **design-only**, not implemented in `owrt-netguard check` or the procd worker. Do not copy this draft into `/etc/config/netguard`. These are diagnostic design decisions, not a release.
+Status (October 23, 2026): **phase 1 read-only profile loading implemented** in [`lib/netguard-profiles.sh`](../lib/netguard-profiles.sh) and [`netguard-profiles`](../netguard-profiles). Profiles are **not integrated** into `owrt-netguard check` or the procd worker. The current diagnostic engine and its legacy UCI lists are unchanged. The new loader does not make network requests, install services or modify network/UCI configuration. Not a release.
 
 ## Why profiles need independent interpretations
 
@@ -37,7 +37,27 @@ All successful survey IPs used `route_unmarked=MATCHES_WAN`, but this is **not p
 
 The verified RU set currently has **only two independently-operated candidates**; a resilient 2-of-3 quorum is **not yet available**. Do not call the selection final or fabricate a third successful resource. Other sites can be added later by the user.
 
-## Proposed target schema (NOT YET PARSED)
+## Phase 1 profile loader and validation
+
+Implementation: `lib/netguard-profiles.sh` (sourceable loader) + `netguard-profiles` (read-only CLI). Validation is enforced for groups (`ru_base`, `ru_diverse`, `international`), unique ASCII names, DNS hostnames, IPv4 or `auto`, sanitized HTTPS paths including query parameters, exact HTTP status or `2xx`, and optional ASCII response token. A maximum of 12 targets is enforced. Invalid UCI data is an explicit error; it never silently falls back to another target list.
+
+```sh
+# From a source checkout, no configuration installed:
+NETGUARD_PROFILES_LIB=./lib/netguard-profiles.sh sh ./netguard-profiles show --profile russia
+NETGUARD_PROFILES_LIB=./lib/netguard-profiles.sh sh ./netguard-profiles show --profile international
+
+# Preview from a disposable config directory only:
+mkdir -p /tmp/netguard-profile-preview
+cp examples/netguard-profiles.preview /tmp/netguard-profile-preview/netguard
+OWRT_NETGUARD_CONFIG_DIR=/tmp/netguard-profile-preview \
+  NETGUARD_PROFILES_LIB=./lib/netguard-profiles.sh sh ./netguard-profiles validate
+```
+
+When no explicit profile is selected, the inspector reports `LEGACY_UNCHANGED`: the existing `list https` and `list dns` are not reinterpreted. If UCI selects a profile, `list https_target` overrides its candidate list; `custom` requires explicit targets. To demonstrate RU candidates without a UCI file, pass `--profile russia`. Built-in targets are provisional *research candidates*, **not a guaranteed RU-wide health profile**; `russia` currently prints `LIMITED_TARGET_DIVERSITY`.
+
+Local test status: `tests/profiles.sh` passed with mocked UCI under BusyBox `ash` 1.37, `dash` and `bash`. It is also wired into the manually triggered OpenWrt 25.12.5 QEMU workflow; **that workflow has not been re-run** for these changes. The files have not yet been field-tested on AX6000. The new format remains deliberately **inactive** in the monitoring engine.
+
+## Target schema (NOW PARSED BY STANDALONE LOADER ONLY)
 
 Consider a new, distinct UCI option `https_target` instead of overloading legacy `https`:
 
