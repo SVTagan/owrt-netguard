@@ -104,6 +104,22 @@ cat /tmp/netguard-runtime/status
 
 Current copies of `/tmp/owrt-netguard` and `/tmp/netguard-state.sh` are required. The `--forever` mode is intended solely for an explicitly enabled future procd service; **do not use it on a production router yet**. Offline tests: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. The [procd lifecycle test](tests/ci/procd-guest.sh) passed in QEMU/OpenWrt 25.12.5 (disabled start, explicit enable, RAM snapshot, stop and restart). The second QEMU run passed the new startup-grace scenarios.
 
+### Experimental WAN path audit
+
+A separate manual [`netguard-path-audit`](netguard-path-audit) command now gathers **read-only routing evidence**, not proof of the route followed by any individual packet. It does not depend on Podkop or other third-party software: it reads standard OpenWrt `ubus`, `jsonfilter`, `ip` output and optional `nft` rules. It **does not change** interfaces, routes or firewall rules.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/SVTagan/owrt-netguard/main/netguard-path-audit -o /tmp/netguard-path-audit
+sh -n /tmp/netguard-path-audit
+sh /tmp/netguard-path-audit
+```
+
+The default destination is `1.1.1.1` (one current HTTPS diagnostic IP); another IPv4 address can be supplied as the first argument, and `OWRT_NETGUARD_WAN` selects another logical WAN. The audit reports whether an **unmarked route** matches that WAN, whether additional IPv4 routing-policy rules exist, and whether nftables contains `route`/`nat` output hooks. These signals do not prove that this particular packet was intercepted.
+
+`PATH_AUDIT: ROUTE_MATCH_ONLY` does **not** mean the actual WAN path was conclusively verified. Netfilter OUTPUT, policy routing and other mechanisms can change packet handling after an ordinary route lookup. `ROUTE_MISMATCH` means the unmarked route chose another interface; `INSUFFICIENT_EVIDENCE` means not enough information is available. The audit makes no network requests and never attributes an outage to the ISP on this evidence alone.
+
+The command is **not invoked by the recurring worker** and does not continuously poll nftables. Its deterministic `sh tests/path-audit.sh ./netguard-path-audit` test is included in the manual QEMU workflow but **has not yet been run there**.
+
 ## Development direction
 
 ### Monitoring and diagnostics
