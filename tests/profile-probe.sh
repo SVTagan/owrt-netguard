@@ -146,6 +146,7 @@ run partial
 assert 'PROFILE_OBSERVATION: RU_PARTIALLY_CONFIRMED'
 run all_fail
 assert 'PROFILE_OBSERVATION: RU_ACCESS_UNCONFIRMED'
+assert 'GROUP ru_diverse targets=2 matched=0 reachable_unverified=0 failed=2 path_uncertain=0'
 run wrong_body
 assert 'result=CONTRACT_MISMATCH'
 assert 'PROFILE_OBSERVATION: RU_PARTIALLY_CONFIRMED'
