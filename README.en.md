@@ -104,6 +104,12 @@ cat /tmp/netguard-runtime/status
 
 Current copies of `/tmp/owrt-netguard` and `/tmp/netguard-state.sh` are required. The `--forever` mode is intended solely for an explicitly enabled future procd service; **do not use it on a production router yet**. Offline tests: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. The [procd lifecycle test](tests/ci/procd-guest.sh) passed in QEMU/OpenWrt 25.12.5 (disabled start, explicit enable, RAM snapshot, stop and restart). The second QEMU run passed the new startup-grace scenarios.
 
+### DNS-independent direct WAN check (opt-in)
+
+The new [`netguard-wan-check`](netguard-wan-check) bridges validated grouped HTTPS contracts to the existing `RESULT:` incident state machine. It requires an explicit profile with at least two **different pinned IPv4** primary endpoints and refuses system-DNS `auto` targets and legacy profiles. It uses `curl -q --resolve --noproxy '*' --interface if!WAN` and verified TLS/HTTP/body contracts, never requiring Podkop/sing-box integrations. A failed set is `EXTERNAL_REACHABILITY_UNCONFIRMED`, **not a claim that the ISP failed**.
+
+Legacy `owrt-netguard check`, worker and procd remain unchanged. The already supported `NETGUARD_CHECK_PATH` override permits bounded manual worker testing with this adapter, not a default service migration. See [design and cautions](docs/wan-only-check.md), [temporary pinned profile](examples/netguard-wan.preview) and [offline test](tests/wan-check.sh). New QEMU and physical AX6000 tests are **pending**.
+
 ### Separate DNS diagnostics (experimental)
 
 The manual [`netguard-dns-probe`](netguard-dns-probe) is **not part of legacy check or the worker**. It queries local DNS at `127.0.0.1`, experimental Russian resolvers (Yandex, SkyDNS), and optional international resolvers (Cloudflare, Google), with `--profile russia|international|all|custom`. A user-controlled `--file /tmp/targets` allows up to eight strictly validated DNS targets.
