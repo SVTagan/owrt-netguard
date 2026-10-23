@@ -82,6 +82,7 @@ check_rc=2
 result=PROBE_ERROR
 cycle=0
 raw_result=PROBE_ERROR
+effective_result=PROBE_ERROR
 startup_remaining=0
 startup_active=0
 
@@ -100,7 +101,7 @@ snapshot() {
     {
         printf 'running=%s\n' "$running"
         printf 'phase=%s\n' "$ng_phase"
-        printf 'result=%s\n' "$result"
+        printf 'result=%s\n' "$effective_result"
         printf 'root=%s\n' "$ng_root"
         printf 'incident_id=%s\n' "$ng_incident"
         printf 'cycle=%s\n' "$cycle"
