@@ -6,7 +6,7 @@ STOP=05
 USE_PROCD=1
 
 start_service() {
-    local active interval wan
+    local active interval wan startup_grace
     config_load netguard
     config_get_bool active main monitor_enabled 0
     [ "$active" -eq 1 ] || return 0
@@ -20,6 +20,17 @@ start_service() {
     [ "$interval" -ge 10 ] 2>/dev/null &&
         [ "$interval" -le 3600 ] 2>/dev/null || {
         echo 'NetGuard: interval must be 10..3600 seconds' >&2
+        return 1
+    }
+
+    config_get startup_grace main startup_grace 90
+    case "$startup_grace" in
+        ''|*[!0-9]*)
+            echo 'NetGuard: invalid startup_grace' >&2
+            return 1 ;;
+    esac
+    [ "$startup_grace" -le 300 ] 2>/dev/null || {
+        echo 'NetGuard: startup_grace must be 0..300 seconds' >&2
         return 1
     }
 
@@ -39,7 +50,7 @@ start_service() {
 
     procd_open_instance
     procd_set_param command /bin/sh /usr/libexec/netguard/netguard-worker --forever "$interval"
-    procd_set_param env "OWRT_NETGUARD_WAN=$wan"
+    procd_set_param env "OWRT_NETGUARD_WAN=$wan" "NETGUARD_STARTUP_GRACE=$startup_grace"
     procd_set_param file /etc/config/netguard
     # Prevent an endless rapid-restart loop if dependencies are absent.
     procd_set_param respawn 3600 10 3
