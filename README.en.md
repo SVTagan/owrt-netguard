@@ -40,7 +40,7 @@ Statuses include `HEALTHY_SAMPLED` (only the sampled paths), `WAN_INITIALIZING` 
 
 **Limitations:** IPv4 only; HTTPS/DNS endpoints can already be configured through UCI. Failure of all selected endpoints does not prove an ISP outage or a payment-related restriction. Captive-portal classification is not yet implemented. `curl --interface`, pinned IPs and unmarked routing do not prove bypass of nftables/PBR, and external DNS probes are not strictly WAN-bound. Incident history, notifications and Recovery are not implemented. Previous hardware tests passed on AX6000/OpenWrt 24.10.5; the latest startup changes have not yet been field-tested.
 
-The manual [OpenWrt 25.12.5 QEMU workflow](tests/ci/README.md) is active. Its [first run passed](https://github.com/SVTagan/owrt-netguard/actions/runs/38820425380): 15 network smoke tests, 46 incident transitions, worker tests and real procd lifecycle. **The latest startup changes have not yet been retested.** No physical OpenWrt 25.12 hardware test has taken place.
+The manual [OpenWrt 25.12.5 QEMU workflow](tests/ci/README.md) is active. Both [run #1](https://github.com/SVTagan/owrt-netguard/actions/runs/38820425380) and [run #2](https://github.com/SVTagan/owrt-netguard/actions/runs/39973225284) passed. The second run covered **16 smoke cases, 55 state transitions, startup grace in the worker and the real procd lifecycle**. The latest changes have not yet been field-tested on the AX6000; no physical OpenWrt 25.12 hardware test has taken place.
 
 ### Custom probe targets (optional)
 
@@ -83,7 +83,7 @@ sh /tmp/netguard-monitor 3 10
 
 The monitor requires an explicit number of cycles (1–30). The interval defaults to 30 seconds. Output includes `SAMPLE`, `STATE` and transition events `OPEN`, `RECLASSIFIED` and `RESOLVED`. Diagnostic command errors become `PROBE_ERROR` instead of being mistaken for proven network outages. Incident state exists **only within the running process**.
 
-Tests: `sh tests/state.sh ./lib/netguard-state.sh` and `sh tests/monitor.sh ./netguard-monitor ./lib/netguard-state.sh`. The state library passed **43 transitions** on a physical AX6000 with OpenWrt 24.10.5. The integrated manual monitor subsequently completed **three consecutive** `HEALTHY_SAMPLED → HEALTHY` cycles and exited cleanly. Failure cases have only been checked with simulated data, not by deliberately disconnecting WAN. The earlier version passed the OpenWrt 25.12.5 QEMU suite; the new initialization logic still needs regression testing.
+Tests: `sh tests/state.sh ./lib/netguard-state.sh` and `sh tests/monitor.sh ./netguard-monitor ./lib/netguard-state.sh`. The state library passed **43 transitions** on a physical AX6000 with OpenWrt 24.10.5. The integrated manual monitor subsequently completed **three consecutive** `HEALTHY_SAMPLED → HEALTHY` cycles and exited cleanly. Failure cases have only been checked with simulated data, not by deliberately disconnecting WAN. The updated WAN initialization logic passed [QEMU/OpenWrt 25.12.5 run #2](https://github.com/SVTagan/owrt-netguard/actions/runs/39973225284) but has not yet been field-tested on the AX6000.
 
 ### Experimental service layer (do not install yet)
 
@@ -102,7 +102,7 @@ NETGUARD_CHECK_PATH=/tmp/owrt-netguard NETGUARD_STATE_PATH=/tmp/netguard-state.s
 cat /tmp/netguard-runtime/status
 ```
 
-Current copies of `/tmp/owrt-netguard` and `/tmp/netguard-state.sh` are required. The `--forever` mode is intended solely for an explicitly enabled future procd service; **do not use it on a production router yet**. Offline tests: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. The [procd lifecycle test](tests/ci/procd-guest.sh) passed in QEMU/OpenWrt 25.12.5 (disabled start, explicit enable, RAM snapshot, stop and restart). New startup-grace scenarios have been added but have not yet been rerun.
+Current copies of `/tmp/owrt-netguard` and `/tmp/netguard-state.sh` are required. The `--forever` mode is intended solely for an explicitly enabled future procd service; **do not use it on a production router yet**. Offline tests: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. The [procd lifecycle test](tests/ci/procd-guest.sh) passed in QEMU/OpenWrt 25.12.5 (disabled start, explicit enable, RAM snapshot, stop and restart). The second QEMU run passed the new startup-grace scenarios.
 
 ## Development direction
 
@@ -140,7 +140,7 @@ Target OpenWrt releases for development and validation:
 
 The intended implementation is lightweight and based on standard OpenWrt mechanisms, without mandatory heavyweight runtime dependencies.
 
-These are **compatibility targets, not claims of fully tested support**. Physical AX6000/OpenWrt 24.10.5 checks and a QEMU/OpenWrt 25.12.5 procd lifecycle run previously passed. The latest startup changes require new tests; physical OpenWrt 25.12 remains untested.
+These are **compatibility targets, not claims of fully tested support**. Physical AX6000/OpenWrt 24.10.5 checks and a QEMU/OpenWrt 25.12.5 procd lifecycle run previously passed. The startup changes passed the second QEMU regression, but have not yet been tested on the AX6000; physical OpenWrt 25.12 remains untested.
 
 ## Design principles
 
