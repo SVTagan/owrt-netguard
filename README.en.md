@@ -120,7 +120,7 @@ The script uses IPv4, `curl --interface if!<wan-device> --noproxy '*'` with TLS 
 
 For custom research targets, use `--file /tmp/targets` with lines in `group|name|https://host/path|expected_http|expected_body` format. Groups are `ru_base`, `ru_diverse`, `international`; HTTP expectations are `200`, `204`, `2xx`, `any`; use `-` for no body token. There is a 16-target maximum. The tool never modifies the file. Proposed production UCI profiles `Russia`/`International`/`Custom` are **not yet implemented**.
 
-This one-shot tool does not start services, change DNS, UCI, firewall rules or routes, or write persistent logs. It sends HTTPS GET requests to the listed public sites and uses a temporary RAM file for expected response-token checks. The deterministic test `sh tests/endpoint-survey.sh ./netguard-endpoint-survey` is wired into the manual OpenWrt 25.12 QEMU workflow but **has not yet been executed there**.
+This one-shot tool does not start services, change DNS, UCI, firewall rules or routes, or write persistent logs. It sends HTTPS GET requests to the listed public sites and uses a temporary RAM file for expected response-token checks. The deterministic `sh tests/endpoint-survey.sh ./netguard-endpoint-survey` suite **passed locally** under BusyBox `ash` 1.37, `dash` and `bash` using the cleaned [commit `476eb67`](https://github.com/SVTagan/owrt-netguard/commit/476eb67420188034818d303bbdd7e6df7a0734c4). Earlier revisions contained duplicated tail blocks that caused syntax errors; do not use those old pinned commits. The test is wired into the manual OpenWrt 25.12 QEMU workflow but **has not yet been rerun there**, nor has the corrected survey been retested on physical AX6000 hardware.
 
 ### Experimental WAN path audit
 
