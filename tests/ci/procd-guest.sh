@@ -30,6 +30,7 @@ cat > /etc/config/netguard <<'EOF'
 config netguard 'main'
     option monitor_enabled '0'
     option interval '10'
+    option startup_grace '90'
     option wan 'wan'
 EOF
 
@@ -40,6 +41,7 @@ EOF
 }
 uci -q get netguard.main.monitor_enabled | grep -qx 0
 uci -q get netguard.main.interval | grep -qx 10
+uci -q get netguard.main.startup_grace | grep -qx 90
 
 cleanup() {
     /etc/init.d/netguard stop >/dev/null 2>&1 || :
