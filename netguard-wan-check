@@ -1,0 +1,175 @@
+#!/bin/sh
+# OWRT NetGuard opt-in WAN-only adapter for existing worker/state machine.
+# Read-only: no DNS, firewall, route, UCI, or service changes.
+set -u
+usage() {
+    printf '%s\n' 'Usage: sh netguard-wan-check check'
+    printf '%s\n' 'Requires explicit profile and >=2 distinct pinned IPv4 HTTPS targets.'
+    printf '%s\n' 'NETGUARD_PROFILES_LIB and NETGUARD_PROFILE_PROBE override source paths.'
+}
+case "${1:-}" in
+    check) [ "$#" -eq 1 ] || { usage >&2; exit 2; } ;;
+    -h|--help|help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+esac
+
+case "$0" in */*) dir=${0%/*} ;; *) dir=. ;; esac
+lib=${NETGUARD_PROFILES_LIB:-"$dir/lib/netguard-profiles.sh"}
+probe=${NETGUARD_PROFILE_PROBE:-"$dir/netguard-profile-probe"}
+[ -r "$lib" ] && [ -r "$probe" ] || {
+    printf 'ERROR: profiles library or profile probe is not readable\n' >&2
+    exit 2
+}
+for utility in ubus jsonfilter; do
+    command -v "$utility" >/dev/null 2>&1 || {
+        printf 'ERROR: missing utility: %s\n' "$utility" >&2
+        exit 2
+    }
+done
+
+. "$lib"
+ng_profiles_load "${OWRT_NETGUARD_PROFILE:-}" || exit 2
+case "$NG_PROFILE_SELECTED" in
+    russia|international|custom) ;;
+    *) printf 'ERROR: WAN-only mode needs an explicit russia/international/custom profile\n' >&2; exit 2 ;;
+esac
+
+# The sampler accepts auto DNS for research. WAN-only checks must not.
+seen_ips=' '
+primary=0
+while IFS='|' read -r group name host address path expected token || [ -n "$group" ]; do
+    [ -n "$group" ] || continue
+    if [ "$address" = auto ]; then
+        printf 'ERROR: WAN-only mode refuses system-DNS target %s (pin IPv4)\n' "$name" >&2
+        exit 2
+    fi
+    case "$NG_PROFILE_SELECTED:$group" in
+        russia:ru_diverse|international:international|custom:*)
+            case "$seen_ips" in
+                *" $address "*)
+                    printf 'ERROR: duplicate pinned IPv4 across primary WAN targets: %s\n' "$address" >&2
+                    exit 2 ;;
+            esac
+            seen_ips="$seen_ips$address "
+            primary=$((primary + 1)) ;;
+    esac
+done <<TARGETS
+$NG_PROFILE_TARGETS
+TARGETS
+if [ "$primary" -lt 2 ]; then
+    printf 'ERROR: WAN-only mode requires >=2 distinct primary HTTPS IPv4 targets\n' >&2
+    exit 2
+fi
+
+wan=${OWRT_NETGUARD_WAN:-wan}
+case "$wan" in
+    ''|*[!a-zA-Z0-9_.-]*) printf 'ERROR: invalid WAN logical interface\n' >&2; exit 2 ;;
+esac
+json=$(ubus call "network.interface.$wan" status 2>/dev/null) || {
+    printf 'ERROR: cannot read WAN interface status\n' >&2
+    exit 2
+}
+field() { printf '%s\n' "$json" | jsonfilter -e "$1" 2>/dev/null | head -n 1; }
+up=$(field '@.up')
+pending=$(field '@.pending')
+wan_dev=$(field '@.l3_device')
+phy=$(field '@.device')
+[ -n "$phy" ] || phy=$wan_dev
+case "$phy" in
+    ''|*[!a-zA-Z0-9_.:@-]*) phy=none ;;
+esac
+carrier=unknown
+if [ "$phy" != none ] && [ -r "/sys/class/net/$phy/carrier" ]; then
+    carrier=$(cat "/sys/class/net/$phy/carrier" 2>/dev/null) || carrier=unknown
+fi
+printf 'OWRT NetGuard — opt-in WAN-only check (pinned IPv4, no DNS)\n'
+printf 'WAN logical=%s device=%s up=%s pending=%s carrier=%s profile=%s primary=%s\n' \
+    "$wan" "${wan_dev:-none}" "$up" "$pending" "$carrier" "$NG_PROFILE_SELECTED" "$primary"
+if [ "$carrier" = 0 ]; then
+    printf 'RESULT: WAN_LINK_DOWN\n'
+    exit 1
+fi
+if [ "$up" != true ] || [ -z "$wan_dev" ]; then
+    if [ "$pending" = true ]; then result=WAN_INITIALIZING; else result=WAN_NO_L3; fi
+    printf 'RESULT: %s\n' "$result"
+    exit 1
+fi
+case "$wan_dev" in
+    *[!a-zA-Z0-9_.:@-]*) printf 'ERROR: invalid WAN L3 device\n' >&2; exit 2 ;;
+esac
+
+# Reuse validated HTTPS contracts, pinned IP, TLS and route checks.
+probe_out=$(sh "$probe" --profile "$NG_PROFILE_SELECTED" 2>&1)
+probe_rc=$?
+printf '%s\n' "$probe_out"
+if [ "$probe_rc" -ne 0 ]; then
+    printf 'ERROR: HTTPS sampler exited %s\n' "$probe_rc" >&2
+    exit 2
+fi
+matched=0
+reachable=0
+aux_reachable=0
+uncertain=0
+unknown_path=0
+wan_became_unready=0
+observed=0
+while IFS= read -r line; do
+    case "$line" in
+        'PROFILE_OBSERVATION: '*)
+            observed=$((observed + 1))
+            case "$line" in
+                *'WAN_UNREADY') wan_became_unready=1 ;;
+            esac ;;
+        'TARGET '*)
+            # Allowlisted/foreign samples cannot satisfy the RU health quorum.
+            case "$NG_PROFILE_SELECTED:$line" in
+                russia:*'group=ru_diverse '*|international:*'group=international '*|custom:*) ;;
+                *)
+                    case "$line" in
+                        *' route_unmarked=MATCHES_WAN'*)
+                            case "$line" in
+                                *' result=MATCHED '*|*' result=REDIRECT '*|*' result=CONTRACT_MISMATCH '*)
+                                    aux_reachable=$((aux_reachable + 1)) ;;
+                            esac ;;
+                    esac
+                    continue ;;
+            esac
+            case "$line" in
+                *' result=MATCHED '*|*' result=REDIRECT '*|*' result=CONTRACT_MISMATCH '*)
+                    case "$line" in
+                        *' dns=PINNED '*' route_unmarked=MATCHES_WAN') ;;
+                        *) uncertain=$((uncertain + 1)); continue ;;
+                    esac ;;
+            esac
+            case "$line" in
+                *' result=MATCHED '*) matched=$((matched + 1)) ;;
+                *' result=REDIRECT '*|*' result=CONTRACT_MISMATCH '*) reachable=$((reachable + 1)) ;;
+                *' result=PATH_UNCONFIRMED '*|*' result=SKIPPED_ROUTE '*) uncertain=$((uncertain + 1)) ;;
+                *' curl_rc=45 '*) unknown_path=$((unknown_path + 1)) ;;
+            esac ;;
+    esac
+done <<EVIDENCE
+$probe_out
+EVIDENCE
+if [ "$observed" -ne 1 ]; then
+    printf 'ERROR: sampler observation missing or duplicated\n' >&2
+    exit 2
+fi
+if [ "$wan_became_unready" -eq 1 ]; then
+    result=WAN_NO_L3
+elif [ "$matched" -ge 2 ]; then
+    result=HEALTHY_SAMPLED
+elif [ "$matched" -gt 0 ] || [ "$reachable" -gt 0 ] || [ "$aux_reachable" -gt 0 ]; then
+    result=PARTIAL_REACHABILITY
+elif [ "$uncertain" -gt 0 ] || [ "$unknown_path" -gt 0 ]; then
+    result=UNKNOWN_ROUTE
+else
+    result=EXTERNAL_REACHABILITY_UNCONFIRMED
+fi
+printf 'WAN_SAMPLE matched=%s reachable_unverified=%s auxiliary_reachable=%s route_uncertain=%s bind_failures=%s\n' \
+    "$matched" "$reachable" "$aux_reachable" "$uncertain" "$unknown_path"
+printf 'RESULT: %s\n' "$result"
+printf 'NOTE: Failed pinned endpoints can be stale or filtered; this result never proves ISP fault.\n'
+printf 'NOTE: Interface binding and unmarked route checks cannot exclude nftables/PBR interception.\n'
+[ "$result" = HEALTHY_SAMPLED ] && exit 0
+exit 1
