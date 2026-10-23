@@ -1,0 +1,21 @@
+# EXPERIMENTAL read-only profile-loader preview, NOT an installation config.
+# Do NOT copy this file to /etc/config/netguard: current owrt-netguard check
+# and procd worker do not yet consume option profile or list https_target.
+# To inspect, copy it as /tmp/netguard-profile-preview/netguard and run
+# netguard-profiles with OWRT_NETGUARD_CONFIG_DIR=/tmp/netguard-profile-preview.
+
+config netguard 'main'
+    option monitor_enabled '0'
+    option interval '30'
+    option startup_grace '90'
+    option wan 'wan'
+    option profile 'russia'
+
+    # New seven-field format (distinct from legacy 'list https'):
+    # group|unique_name|TLS_hostname|IPv4_or_auto|path|HTTP_code|body_token_or_dash
+    list https_target 'ru_diverse|selectel|selectel.ru|auto|/robots.txt|200|User-agent'
+    list https_target 'ru_diverse|timeweb|timeweb.com|auto|/robots.txt|200|User-agent'
+
+# International profile built-in candidates: gstatic, Apple and Mozilla.
+# They are only additional samples, not an ISP health verdict in Russia.
+# Profile 'custom' requires an explicit list https_target.
