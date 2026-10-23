@@ -22,6 +22,8 @@ This directory contains an **active, manually triggered** QEMU test harness for 
 
 **Run #5: SUCCESS (2026-10-23).** [Full log](https://github.com/SVTagan/owrt-netguard/actions/runs/40030153822): 16 diagnostic smoke scenarios, 55 state transitions, bounded monitor and worker, route audit, endpoint survey, profiles with actual guest UCI, **grouped profile HTTPS synthetic cases**, one-shot `HEALTHY_SAMPLED`, and full procd lifecycle. The reordered offline tests completed before the curl installation; the apk feed succeeded on its first attempt. The new grouped probe still needs real field tests on AX6000/OpenWrt 24.10.5. No test establishes ISP fault attribution or the absence of nftables/PBR interception.
 
+**Next DNS regression (pending):** The separate `netguard-dns-probe` and `tests/dns-probe.sh` are now copied into QEMU guest RAM, syntax-checked under OpenWrt BusyBox and run with deterministic DNS/router mocks **before** network package installation. Offline local BusyBox ash/dash/bash tests passed, but no QEMU or physical AX6000 run covers the new module yet. A future pass of the mocked test will not prove that plaintext UDP/53 reached the intended DNS server or that DNS failure implies ISP failure.
+
 Reference: https://openwrt.org/docs/guide-user/virtualization/qemu
 
 **Security:** Only use the default empty root password in the disposable, isolated test VM, never on a real Internet-exposed OpenWrt system.
