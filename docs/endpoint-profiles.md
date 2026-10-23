@@ -55,7 +55,7 @@ OWRT_NETGUARD_CONFIG_DIR=/tmp/netguard-profile-preview \
 
 When no explicit profile is selected, the inspector reports `LEGACY_UNCHANGED`: the existing `list https` and `list dns` are not reinterpreted. If UCI selects a profile, `list https_target` overrides its candidate list; `custom` requires explicit targets. To demonstrate RU candidates without a UCI file, pass `--profile russia`. Built-in targets are provisional *research candidates*, **not a guaranteed RU-wide health profile**; `russia` currently prints `LIMITED_TARGET_DIVERSITY`.
 
-Local test status: `tests/profiles.sh` passed with mocked UCI under BusyBox `ash` 1.37, `dash` and `bash`. It is also wired into the manually triggered OpenWrt 25.12.5 QEMU workflow; **that workflow has not been re-run** for these changes. The files have not yet been field-tested on AX6000. The new format remains deliberately **inactive** in the monitoring engine.
+Test status: `tests/profiles.sh` passed locally under BusyBox `ash` 1.37, `dash` and `bash`. [OpenWrt 25.12.5 QEMU workflow run #3](https://github.com/SVTagan/owrt-netguard/actions/runs/39990869415) **passed** (2026-10-23): mock tests, startup/worker regressions, endpoint survey, WAN path audit, **actual guest UCI parsing** of the preview profile, and `procd` lifecycle. Real UCI reported `PROFILE selected=russia source=uci+uci-targets targets=2` and group counts `ru_diverse=2`. The files have not yet been field-tested on physical AX6000. The new format remains deliberately **inactive** in the monitoring engine.
 
 ## Target schema (NOW PARSED BY STANDALONE LOADER ONLY)
 
