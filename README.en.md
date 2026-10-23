@@ -104,6 +104,16 @@ cat /tmp/netguard-runtime/status
 
 Current copies of `/tmp/owrt-netguard` and `/tmp/netguard-state.sh` are required. The `--forever` mode is intended solely for an explicitly enabled future procd service; **do not use it on a production router yet**. Offline tests: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. The [procd lifecycle test](tests/ci/procd-guest.sh) passed in QEMU/OpenWrt 25.12.5 (disabled start, explicit enable, RAM snapshot, stop and restart). The second QEMU run passed the new startup-grace scenarios.
 
+### Grouped HTTPS profile diagnostics: experimental manual mode
+
+The new isolated [`netguard-profile-probe`](netguard-profile-probe) consumes validated profiles without changing legacy `owrt-netguard check`, procd or the worker. It sends bounded HTTPS GET probes, checks TLS verification, expected HTTP codes and optional body tokens, and reports **separate evidence** for `ru_base`, `ru_diverse` and `international`.
+
+All `PROFILE_OBSERVATION` results — including `RU_REACHABLE_SAMPLED`, `RU_PARTIALLY_CONFIRMED`, `POSSIBLE_LIMITED_ACCESS` and `INTERNATIONAL_UNCONFIRMED` — are **observations, not ISP attribution**. A blocked foreign group cannot overrule confirmed Russian connectivity. An `auto` endpoint depends on system DNS; a pinned IP uses `curl --resolve`. Matching an ordinary route does not exclude nftables/PBR interception.
+
+The manual tool requires an explicitly selected profile or preview UCI setting and rejects legacy mode. It changes no DNS, UCI, firewall, route or service configuration. A maximum of 12 endpoints can be queried, each with an 8-second deadline and 32-KiB response cap. It is **not part of the recurring worker**.
+
+Local deterministic [tests](tests/profile-probe.sh) passed under BusyBox `ash`, `dash`, `bash`, covering international filtering with healthy RU targets, allowlist-only access, bad HTTP bodies, redirect, DNS failure with successful pinned HTTPS, route mismatch and TLS errors. The tests are wired into the manual QEMU workflow but **have not yet been executed there**, and the grouped probe has not yet been field-tested on AX6000. See [design and test boundaries](docs/endpoint-profiles.md).
+
 ### Endpoint profiles: experimental configuration loader
 
 Phase 1 is implemented in [`lib/netguard-profiles.sh`](lib/netguard-profiles.sh) and [`netguard-profiles`](netguard-profiles). These commands **only validate and display configuration**; the original `owrt-netguard check`, legacy `list https` / `list dns` options and procd worker remain unchanged.
