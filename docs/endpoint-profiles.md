@@ -79,6 +79,33 @@ international|mozilla|detectportal.firefox.com|auto|/success.txt|200|success
 
 Additional safely configurable parameters: minimum independent successes, group inclusion and per-target timeout, with bounded input sizes. Initially, the profile should not mutate DNS, routes, nftables or state outside `/tmp`.
 
+## Phase 2 — isolated grouped HTTPS sampler (experimental)
+
+The [`netguard-profile-probe`](../netguard-profile-probe) command now consumes profile definitions from `lib/netguard-profiles.sh` and makes read-only, bounded, IPv4 HTTPS GET requests. This is a **manual opt-in research tool**, not a replacement for `owrt-netguard check` or the `procd` worker.
+
+```sh
+# Example from an unpacked checkout, using a preview file in /tmp:
+OWRT_NETGUARD_CONFIG_DIR=/tmp/netguard-profile-preview \
+NETGUARD_PROFILES_LIB=./lib/netguard-profiles.sh \
+sh ./netguard-profile-probe
+
+# Explicitly choose the candidate profile without a UCI config:
+OWRT_NETGUARD_CONFIG_DIR=/tmp/empty-netguard-config \
+NETGUARD_PROFILES_LIB=./lib/netguard-profiles.sh \
+sh ./netguard-profile-probe --profile russia
+```
+
+The CLI deliberately rejects the legacy profile so no unattended monitor changes behavior by accident. On WAN-down it returns a `PROFILE_OBSERVATION: WAN_UNREADY` without any probes, **not** a judgement about the ISP. Individual targets show `MATCHED`, `CONTRACT_MISMATCH`, `REDIRECT`, `BODY_LIMIT`, `TIMEOUT`, `DNS_FAILED`, `TLS_FAILED`, `SKIPPED_ROUTE` or `PATH_UNCONFIRMED`; group lines report successful contracts, transport-only evidence, failures and path uncertainty.
+
+- Only HTTPS is used, with verified certificates, `curl -4 --noproxy '*'`, explicit interface binding, no redirect following and at most 4 seconds to connect, 8 seconds total, 32 KiB response body **per target**. A max of 12 HTTPS targets is enforced by the loader; worst-case all targets can take roughly 96 seconds. The manual tool is **not invoked periodically**.
+- `auto` resolves TLS hostnames via existing system DNS, therefore does **not** isolate DNS failure from WAN failure. A pinned IPv4 uses `--resolve` to avoid DNS for that HTTPS destination. A pinned destination with a known different unmarked route is skipped; an unmarked route match is **still not proof** that nftables/PBR left the packet untouched.
+- `MATCHED` requires curl exit 0, TLS verification 0, matching expected HTTP code (or `2xx`) and the body token when configured. HTTP 200 without the token, HTTP redirect, oversized body or failure of a foreign endpoint is never counted as a good health contract.
+- A confirmed sample requires the unmarked route to match the configured WAN. Route mismatch/unknown is classed as path uncertainty; the code does not modify or bypass policy routing, kill switches, DNS, network interfaces or firewall.
+- `russia` derives `RU_REACHABLE_SAMPLED` from at least two matching RU-diverse targets, `RU_PARTIALLY_CONFIRMED` from one, `POSSIBLE_LIMITED_ACCESS` from RU-base transport when RU-diverse is unconfirmed, or `RU_ACCESS_UNCONFIRMED` otherwise. **These are observations, not a proof of carrier/ISP failure or of true target ownership independence.** Foreign endpoint failures are reported separately and do not downgrade working RU targets.
+- `international` and `custom` have separate sampled/unconfirmed outputs. There is deliberately no `RESULT:` for the old state machine, and no RAM incident history or remediation.
+
+Local deterministic [`tests/profile-probe.sh`](../tests/profile-probe.sh) passed under BusyBox `ash` 1.37, `dash` and `bash`. The synthetic scenarios include blocked international probes with healthy RU, an allowlist-only network, 1/2 RU target failure, all failures, response-body mismatch/redirect, oversized response, policy-route mismatch, pinned HTTPS success while auto-DNS fails and TLS failure. The test is wired into the manually triggered OpenWrt 25.12.5 QEMU workflow but **has not yet been run in QEMU or on the physical AX6000**. Such offline tests do not establish real-world endpoint reachability.
+
 ## Evaluation and false-alarm safeguards
 
 1. WAN physical/link/L3 diagnostics remain independent of any HTTPS endpoint.
@@ -92,7 +119,7 @@ Additional safely configurable parameters: minimum independent successes, group 
 ## Implementation/testing sequence
 
 1. Add pure read-only profile/target loading with full input validation and legacy config compatibility; mocked UCI tests for `russia`, `international`, `custom` and invalid configs.
-2. Implement grouped HTTPS responses and body tokens, bound time/size limits, `auto` vs pinned DNS distinction, and no false ISP inference.
+2. **Implemented as isolated manual experimental sampler:** grouped HTTPS responses and body tokens, bounded time/size limits, `auto` vs pinned DNS distinction and conservative non-ISP classifications. Still awaiting a fresh QEMU run and physical field trial.
 3. Add synthetic tests for (a) blocked international + RU healthy, (b) allowlist-only, (c) one of two RU down, (d) all independent groups fail, (e) DNS blocked but pinned HTTPS working, (f) routing/Podkop uncertainty, (g) redirects/challenge HTTP 200, and (h) stale/empty UCI.
 4. Run local BusyBox ash tests **before** publishing to main; then the manually triggered OpenWrt 25.12 QEMU workflow and opt-in bounded `/tmp` field checks on OpenWrt 24.10.5.
 5. Only after these tests consider activating user-configurable profiles in the always-on worker. Installer/autostart remain out of scope until confirmed.
