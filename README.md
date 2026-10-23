@@ -40,7 +40,7 @@ OWRT_NETGUARD_WAN=wan2 sh /tmp/owrt-netguard check
 
 **Важные ограничения:** реализована только IPv4-диагностика; UCI позволяет задать собственные HTTPS/DNS-цели. Сбой всех выбранных целей не доказывает аварию провайдера; ограниченный доступ из-за неоплаты или captive portal пока отдельно не определяется. `curl --interface`, закреплённые IP и обычная таблица маршрутов не гарантируют обход nftables/PBR; внешний `nslookup` не привязан строго к WAN. История инцидентов, уведомления и Recovery не реализованы. Предыдущая версия диагностических компонентов прошла испытания на AX6000/OpenWrt 24.10.5, новая логика ожидания WAN прошла проверку на физическом AX6000 (3 цикла) и в QEMU/OpenWrt 25.12.5.
 
-Активирован ручной [GitHub Actions QEMU-стенд OpenWrt 25.12.5](tests/ci/README.md). [Запуски №1](https://github.com/SVTagan/owrt-netguard/actions/runs/38820425380), [№2](https://github.com/SVTagan/owrt-netguard/actions/runs/39973225284) и [№3](https://github.com/SVTagan/owrt-netguard/actions/runs/39990869415) завершились успешно. Третий прогон проверил 16 smoke-сценариев, 55 переходов, worker, procd, аудит WAN-пути, endpoint survey и загрузчик профилей с **настоящим UCI OpenWrt**. Обновлённый worker уже проверен на AX6000, но профили пока нет; аппаратных испытаний OpenWrt 25.12 не было.
+Активирован ручной [GitHub Actions QEMU-стенд OpenWrt 25.12.5](tests/ci/README.md). [Запуски №1](https://github.com/SVTagan/owrt-netguard/actions/runs/38820425380), [№2](https://github.com/SVTagan/owrt-netguard/actions/runs/39973225284), [№3](https://github.com/SVTagan/owrt-netguard/actions/runs/39990869415) и [№5](https://github.com/SVTagan/owrt-netguard/actions/runs/40030153822) завершились успешно. Запуск №4 остановился из-за недоступности индекса apk, а не из-за сбоя тестов. Третий прогон проверил 16 smoke-сценариев, 55 переходов, worker, procd, аудит WAN-пути, endpoint survey и загрузчик профилей с **настоящим UCI OpenWrt**. Обновлённый worker и загрузчик профилей проверены на AX6000. Новый движок групповых HTTPS-проверок успешно прошёл QEMU №5, но ещё не проверен на AX6000; аппаратных испытаний OpenWrt 25.12 не было.
 
 ### Собственные контрольные адреса (необязательно)
 
@@ -112,7 +112,7 @@ cat /tmp/netguard-runtime/status
 
 Команда требует явного выбора профиля либо временной UCI-конфигурации с `option profile`; при старом профиле `legacy` она отказывается от выполнения, чтобы случайно не изменить смысл штатной диагностики. Никаких изменений DNS, UCI, firewall, маршрутов и работающих служб нет. Максимум 12 endpoint по 8 секунд каждый, размер одного ответа — 32 КиБ. В автоматический worker пока **не интегрирована**.
 
-Локальные [тесты](tests/profile-probe.sh) прошли в BusyBox `ash`, `dash`, `bash`, включая режим белых списков, отказ иностранных целей, неверный HTTP-body, DNS-ошибку при успешном закреплённом IP, расхождение маршрутов и TLS-ошибку. Тесты добавлены в ручной QEMU workflow, но **новый прогон ещё не выполнялся**; полевых тестов модуля на AX6000 тоже пока нет. Подробнее — [архитектура профилей](docs/endpoint-profiles.md).
+Локальные [тесты](tests/profile-probe.sh) прошли в BusyBox `ash`, `dash`, `bash`, включая режим белых списков, отказ иностранных целей, неверный HTTP-body, DNS-ошибку при успешном закреплённом IP, расхождение маршрутов и TLS-ошибку. Тесты успешно прошли [QEMU-прогон №5](https://github.com/SVTagan/owrt-netguard/actions/runs/40030153822); реальных групповых HTTPS-испытаний модуля на AX6000 ещё не было. Подробнее — [архитектура профилей](docs/endpoint-profiles.md).
 
 ### Профили endpoint: экспериментальный загрузчик конфигурации
 
@@ -122,7 +122,7 @@ cat /tmp/netguard-runtime/status
 
 Пример конфигурации [`examples/netguard-profiles.preview`](examples/netguard-profiles.preview) предназначен **исключительно для просмотра из /tmp**; копировать его в `/etc/config/netguard` пока нельзя, поскольку рабочий `check` ещё не читает новый формат и продолжит использовать старые цели. Отсутствие `option profile` сохраняет `LEGACY_UNCHANGED`. Схема и границы применения описаны в [`docs/endpoint-profiles.md`](docs/endpoint-profiles.md).
 
-Локальные офлайн-тесты [`tests/profiles.sh`](tests/profiles.sh) прошли под BusyBox `ash` 1.37, `dash` и `bash`; и в [QEMU-прогоне №3](https://github.com/SVTagan/owrt-netguard/actions/runs/39990869415), включая чтение настроек настоящим UCI. Полевых испытаний профилей на AX6000 пока нет.
+Локальные офлайн-тесты [`tests/profiles.sh`](tests/profiles.sh) прошли под BusyBox `ash` 1.37, `dash` и `bash`; и в [QEMU-прогоне №3](https://github.com/SVTagan/owrt-netguard/actions/runs/39990869415), включая чтение настроек настоящим UCI. Загрузчик профилей проверен на AX6000/OpenWrt 24.10.5 с временным UCI-файлом в `/tmp` (две цели Selectel и Timeweb, `LIMITED_TARGET_DIVERSITY`); групповой HTTPS-движок на AX6000 пока не запускался.
 
 ### Исследовательская проверка endpoint для РФ и международных сетей
 
