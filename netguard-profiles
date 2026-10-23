@@ -1,0 +1,38 @@
+#!/bin/sh
+# Experimental, read-only endpoint profile inspection; no network requests.
+set -u
+usage() {
+    printf '%s\n' 'Usage: sh netguard-profiles validate|show [--profile russia|international|custom|legacy]'
+    printf '%s\n' 'Environment: OWRT_NETGUARD_CONFIG_DIR=/etc/config (or temporary /tmp directory)'
+    printf '%s\n' '             NETGUARD_PROFILES_LIB=path/to/lib/netguard-profiles.sh'
+}
+case "${1:-}" in
+    validate|show) action=$1; shift ;;
+    help|-h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+esac
+chosen=
+if [ "$#" -gt 0 ]; then
+    [ "$#" -eq 2 ] && [ "$1" = --profile ] || { usage >&2; exit 2; }
+    chosen=$2
+fi
+lib=${NETGUARD_PROFILES_LIB:-/usr/lib/netguard/netguard-profiles.sh}
+[ -r "$lib" ] || { printf 'ERROR: profiles library missing: %s\n' "$lib" >&2; exit 2; }
+. "$lib"
+ng_profiles_load "$chosen" || exit 2
+printf 'PROFILE selected=%s source=%s targets=%s\n' "$NG_PROFILE_SELECTED" "$NG_PROFILE_SOURCE" "$NG_PROFILE_COUNT"
+if [ "$NG_PROFILE_SELECTED" = legacy ]; then
+    printf 'LEGACY_UNCHANGED: profile layer is inactive; existing check and worker remain untouched\n'
+    exit 0
+fi
+printf 'GROUP_COUNTS ru_base=%s ru_diverse=%s international=%s\n' "$NG_PROFILE_RU_BASE" "$NG_PROFILE_RU_DIVERSE" "$NG_PROFILE_INTL"
+if [ "$NG_PROFILE_SELECTED" = russia ] && [ "$NG_PROFILE_RU_DIVERSE" -lt 3 ]; then
+    printf 'NOTE: LIMITED_TARGET_DIVERSITY (fewer than 3 listed RU-diverse endpoints; ownership not verified automatically)\n'
+fi
+if [ "$action" = show ]; then
+    printf '%s\n' "$NG_PROFILE_TARGETS" | while IFS= read -r entry; do
+        case "$entry" in *'|auto|'*) mode=SYSTEM ;; *) mode=PINNED ;; esac
+        printf 'TARGET %s dns=%s\n' "$entry" "$mode"
+    done
+fi
+printf 'NOTE: profile definitions are not connected to owrt-netguard check or worker; no network probes ran.\n'
