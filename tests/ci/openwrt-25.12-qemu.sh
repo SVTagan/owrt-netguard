@@ -77,10 +77,6 @@ echo "== Verify OS and built-in utilities =="
 ssh_guest 'cat /etc/openwrt_release; echo; apk --version; echo; ubus list network.interface.*; echo; nslookup -h 2>&1 | head -n 12 || true'
 ssh_guest "grep -q \"DISTRIB_RELEASE='${RELEASE}'\" /etc/openwrt_release"
 
-echo "== Install only the curl dependency inside the disposable VM =="
-# Both apk operations are deliberately bounded by the workflow job timeout.
-ssh_guest 'apk update && apk add curl ca-bundle'
-
 echo "== Copy current code and offline smoke tests into guest RAM =="
 ssh_input 'cat > /tmp/owrt-netguard' < owrt-netguard
 ssh_input 'cat > /tmp/netguard-smoke.sh' < tests/smoke.sh
@@ -117,6 +113,23 @@ ssh_guest 'sh /tmp/netguard-profiles-test.sh /tmp/netguard-profiles /tmp/netguar
 ssh_guest 'sh /tmp/netguard-profile-probe-test.sh /tmp/netguard-profile-probe'
 echo "== Validate preview profile using real guest UCI, not just mocks =="
 ssh_guest 'mkdir -p /tmp/netguard-profile-preview && cp /tmp/netguard-profiles-preview /tmp/netguard-profile-preview/netguard && OWRT_NETGUARD_CONFIG_DIR=/tmp/netguard-profile-preview NETGUARD_PROFILES_LIB=/tmp/netguard-profiles.sh sh /tmp/netguard-profiles show > /tmp/netguard-profile-preview.out && grep -q "^PROFILE selected=russia source=uci+uci-targets targets=2$" /tmp/netguard-profile-preview.out && grep -q "^GROUP_COUNTS ru_base=0 ru_diverse=2 international=0$" /tmp/netguard-profile-preview.out && cat /tmp/netguard-profile-preview.out'
+
+echo "== Install curl dependency inside disposable VM (bounded retry) =="
+# Network package feeds can fail transiently even when local tests pass.
+# Run offline tests first; retries do not hide a persistent infra failure.
+ssh_guest 'ok=0
+for attempt in 1 2 3; do
+    echo "OpenWrt package feed attempt $attempt/3"
+    if apk update && apk add curl ca-bundle; then
+        ok=1
+        break
+    fi
+    [ "$attempt" -eq 3 ] || sleep 4
+done
+if [ "$ok" -ne 1 ] || ! command -v curl >/dev/null 2>&1; then
+    echo "ERROR: CI infrastructure: OpenWrt package bootstrap failed after 3 attempts" >&2
+    exit 1
+fi'
 
 echo "== Run real one-shot probe in VM; endpoint reachability is informational =="
 # A CI runner is NOT representative of Crimea or any ISP. Any meaningful
