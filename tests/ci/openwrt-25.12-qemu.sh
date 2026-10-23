@@ -95,12 +95,14 @@ ssh_input 'cat > /tmp/netguard-profiles' < netguard-profiles
 ssh_input 'cat > /tmp/netguard-profiles-test.sh' < tests/profiles.sh
 ssh_input 'cat > /tmp/netguard-profile-probe' < netguard-profile-probe
 ssh_input 'cat > /tmp/netguard-profile-probe-test.sh' < tests/profile-probe.sh
+ssh_input 'cat > /tmp/netguard-dns-probe' < netguard-dns-probe
+ssh_input 'cat > /tmp/netguard-dns-probe-test.sh' < tests/dns-probe.sh
 ssh_input 'cat > /tmp/netguard-profiles-preview' < examples/netguard-profiles.preview
 ssh_input 'cat > /tmp/netguard-init.sh' < service/netguard.init
 ssh_input 'cat > /tmp/netguard-procd-test.sh' < tests/ci/procd-guest.sh
 
 echo "== Syntax test using OpenWrt BusyBox shell =="
-ssh_guest 'sh -n /tmp/owrt-netguard && sh -n /tmp/netguard-smoke.sh && sh -n /tmp/netguard-state.sh && sh -n /tmp/netguard-state-test.sh && sh -n /tmp/netguard-monitor && sh -n /tmp/netguard-monitor-test.sh && sh -n /tmp/netguard-worker && sh -n /tmp/netguard-worker-test.sh && sh -n /tmp/netguard-path-audit && sh -n /tmp/netguard-path-audit-test.sh && sh -n /tmp/netguard-endpoint-survey && sh -n /tmp/netguard-endpoint-survey-test.sh && sh -n /tmp/netguard-profiles.sh && sh -n /tmp/netguard-profiles && sh -n /tmp/netguard-profiles-test.sh && sh -n /tmp/netguard-profile-probe && sh -n /tmp/netguard-profile-probe-test.sh && sh -n /tmp/netguard-init.sh && sh -n /tmp/netguard-procd-test.sh'
+ssh_guest 'sh -n /tmp/owrt-netguard && sh -n /tmp/netguard-smoke.sh && sh -n /tmp/netguard-state.sh && sh -n /tmp/netguard-state-test.sh && sh -n /tmp/netguard-monitor && sh -n /tmp/netguard-monitor-test.sh && sh -n /tmp/netguard-worker && sh -n /tmp/netguard-worker-test.sh && sh -n /tmp/netguard-path-audit && sh -n /tmp/netguard-path-audit-test.sh && sh -n /tmp/netguard-endpoint-survey && sh -n /tmp/netguard-endpoint-survey-test.sh && sh -n /tmp/netguard-profiles.sh && sh -n /tmp/netguard-profiles && sh -n /tmp/netguard-profiles-test.sh && sh -n /tmp/netguard-profile-probe && sh -n /tmp/netguard-profile-probe-test.sh && sh -n /tmp/netguard-dns-probe && sh -n /tmp/netguard-dns-probe-test.sh && sh -n /tmp/netguard-init.sh && sh -n /tmp/netguard-procd-test.sh'
 
 echo "== Run deterministic smoke tests inside genuine OpenWrt 25.12 =="
 ssh_guest 'sh /tmp/netguard-smoke.sh /tmp/owrt-netguard'
@@ -111,6 +113,7 @@ ssh_guest 'sh /tmp/netguard-path-audit-test.sh /tmp/netguard-path-audit'
 ssh_guest 'sh /tmp/netguard-endpoint-survey-test.sh /tmp/netguard-endpoint-survey'
 ssh_guest 'sh /tmp/netguard-profiles-test.sh /tmp/netguard-profiles /tmp/netguard-profiles.sh'
 ssh_guest 'sh /tmp/netguard-profile-probe-test.sh /tmp/netguard-profile-probe'
+ssh_guest 'sh /tmp/netguard-dns-probe-test.sh /tmp/netguard-dns-probe'
 echo "== Validate preview profile using real guest UCI, not just mocks =="
 ssh_guest 'mkdir -p /tmp/netguard-profile-preview && cp /tmp/netguard-profiles-preview /tmp/netguard-profile-preview/netguard && OWRT_NETGUARD_CONFIG_DIR=/tmp/netguard-profile-preview NETGUARD_PROFILES_LIB=/tmp/netguard-profiles.sh sh /tmp/netguard-profiles show > /tmp/netguard-profile-preview.out && grep -q "^PROFILE selected=russia source=uci+uci-targets targets=2$" /tmp/netguard-profile-preview.out && grep -q "^GROUP_COUNTS ru_base=0 ru_diverse=2 international=0$" /tmp/netguard-profile-preview.out && cat /tmp/netguard-profile-preview.out'
 
