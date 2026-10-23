@@ -104,6 +104,24 @@ cat /tmp/netguard-runtime/status
 
 Для теста требуются актуальные `/tmp/owrt-netguard` и `/tmp/netguard-state.sh`, уже загруженные по инструкциям выше. `--forever` существует только для будущего явно разрешённого `procd`-запуска; **пока его на рабочем роутере не используйте**. Офлайн-сценарии: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. В QEMU/OpenWrt 25.12.5 успешно прошёл [тест жизненного цикла procd](tests/ci/procd-guest.sh): выключенный сервис → явное включение → RAM-состояние → остановка → повторный запуск. Во втором QEMU-прогоне новые тесты стартового периода и превышения его срока успешно выполнены. Worker теперь проверен на реальном Redmi AX6000 (OpenWrt 24.10.5): три цикла дали `HEALTHY_SAMPLED`, итоговый RAM-снимок показал `running=0`, `phase=HEALTHY`, `result=HEALTHY_SAMPLED`, `cycle=3`. Работа через `procd`, реальное аварийное завершение и постоянное хранение событий ещё не проверялись.
 
+### Исследовательская проверка endpoint для РФ и международных сетей
+
+Подготовлен отдельный **ручной**, не участвующий в штатном мониторинге скрипт [`netguard-endpoint-survey`](netguard-endpoint-survey). Это инструмент **отбора** контрольных ресурсов, а не новые production-defaults. Российские сайты могут отдавать redirect и большие страницы; их ответы, CDN/IP и пригодность ещё нужно проверить на реальных операторах. Международные адреса используются для сравнения, **не для доказательства аварии провайдера при блокировке**.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/SVTagan/owrt-netguard/main/netguard-endpoint-survey -o /tmp/netguard-endpoint-survey
+sh -n /tmp/netguard-endpoint-survey
+sh /tmp/netguard-endpoint-survey --profile all
+```
+
+Есть фильтры `--profile ru` (пять российских ресурсов в группах `ru_base` и `ru_diverse`) и `--profile international` (три зарубежных проверочных ресурса из VPN Failover). **Эти группы пока не являются профилями рабочего NetGuard.** В текущей кандидатной группе `ru_base` — `ya.ru`, `mail.ru`, в `ru_diverse` — `reg.ru`, `nic.ru`, `timeweb.com`. В международной группе — `www.gstatic.com/generate_204` (HTTP 204), `captive.apple.com/hotspot-detect.html` (HTTP 200 + `Success`), `detectportal.firefox.com/success.txt` (HTTP 200 + `success`).
+
+Скрипт применяет `curl -4 --interface if!<wan-device> --noproxy '*'`, проверяет TLS и выводит фактический адрес подключения (`remote_ip`), HTTP-код, время, объём ответа и **немаркированный** маршрут к полученному IP. Системный DNS остаётся прежним; перенаправления не выполняются, максимальное время ответа — 8 секунд, размер тела ограничен 128 КиБ. `REDIRECT`, `BODY_LIMIT`, `CONTRACT_MISMATCH` и `ERROR` — разные признаки, они **не равнозначны отключению интернета**. Даже `MATCHED` не удостоверяет физический путь через провайдера при наличии nftables/PBR, а лишь выполнение HTTP/TLS-критериев отдельного endpoint.
+
+Для эксперимента со **своими** кандидатами предусмотрен `--file /tmp/targets`: строки `group|name|https://host/path|expected_http|expected_body`, группировка `ru_base`/`ru_diverse`/`international`, HTTP-критерии `200`, `204`, `2xx`, `any`, значение `-` вместо проверки тела. Не более 16 целей. Файл задаётся самим пользователем: скрипт его не изменяет. UCI-профили рабочего мониторинга `Russia`/`International`/`Custom` ещё **не реализованы** — их проектируем после проверки кандидатов.
+
+Утилита не меняет UCI, DNS, сетевые интерфейсы или firewall, не устанавливает службу, не пишет результаты на flash. Только HTTPS GET к перечисленным публичным ресурсам и кратковременный файл тела в `/tmp` для точной проверки токенов. Офлайн-тест `sh tests/endpoint-survey.sh ./netguard-endpoint-survey` подключён к ручному workflow QEMU, но **пока не прогонялся**.
+
 ### Экспериментальный аудит WAN-пути
 
 Добавлена отдельная ручная команда [`netguard-path-audit`](netguard-path-audit). Это **чтение диагностических признаков**, а не доказательство фактического пути каждого пакета. Утилита не зависит от Podkop и других пакетов; на чистом OpenWrt она работает с `ubus`, `jsonfilter`, `ip` и, если доступен, `nft`. Политики и таблицы nftables **не изменяются**.
