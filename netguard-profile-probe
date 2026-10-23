@@ -133,7 +133,7 @@ probe_one() {
         out=$body_file
     fi
     if [ "$dns_mode" = PINNED ]; then
-        metrics=$(curl -4 --noproxy '*' --interface "if!$wan_dev" \
+        metrics=$(curl -q -4 --noproxy '*' --interface "if!$wan_dev" \
             --proto '=https' --resolve "$host:443:$pinned" \
             --connect-timeout 4 --max-time 8 --max-filesize 32768 \
             --silent --output "$out" \
@@ -141,7 +141,7 @@ probe_one() {
             -- "https://$host$path" 2>/dev/null)
         rc=$?
     else
-        metrics=$(curl -4 --noproxy '*' --interface "if!$wan_dev" \
+        metrics=$(curl -q -4 --noproxy '*' --interface "if!$wan_dev" \
             --proto '=https' --connect-timeout 4 --max-time 8 --max-filesize 32768 \
             --silent --output "$out" \
             --write-out '%{http_code}|%{remote_ip}|%{ssl_verify_result}|%{time_total}|%{size_download}' \
@@ -197,6 +197,12 @@ NG_METRICS
             esac
             quality=reachable
         fi
+    fi
+    # A pinned connection must actually reach the pinned address. Prevent
+    # a changed destination or unexpected curl behavior from satisfying quorum.
+    if [ "$dns_mode" = PINNED ] && [ "$rc" -eq 0 ] && [ "$remote" != "$pinned" ]; then
+        result=PATH_UNCONFIRMED
+        quality=uncertain
     fi
     # An explicitly different unmarked egress path or an unknown route
     # cannot be promoted to a confirmed WAN sample, regardless of HTTP 200.
