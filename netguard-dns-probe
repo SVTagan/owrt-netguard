@@ -1,0 +1,208 @@
+#!/bin/sh
+# OWRT NetGuard — isolated read-only DNS path sampling for OpenWrt.
+# Not a resolver-health guarantee: UDP/53 can be intercepted and spoofed.
+set -u
+
+usage() {
+    cat <<'HELP'
+Usage: sh netguard-dns-probe [--profile russia|international|all|custom] [--file /tmp/targets]
+Target format: group|name|IPv4_resolver|FQDN
+Groups: local, ru, international. The custom profile requires --file.
+This tool does NOT change DNS, UCI, routes, firewall, or running services.
+HELP
+}
+profile=russia
+file=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --profile) [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            profile=$2; shift 2 ;;
+        --file) [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            file=$2; shift 2 ;;
+        -h|--help|help) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+case "$profile" in russia|international|all|custom) ;; *) usage >&2; exit 2 ;; esac
+if [ "$profile" = custom ] && [ -z "$file" ]; then
+    printf 'ERROR: custom profile requires --file\n' >&2
+    exit 2
+fi
+if [ -n "$file" ]; then
+    [ -f "$file" ] && [ -r "$file" ] || { printf 'ERROR: target file is unreadable\n' >&2; exit 2; }
+fi
+for cmd in ubus jsonfilter ip nslookup grep awk; do
+    command -v "$cmd" >/dev/null 2>&1 || { printf 'ERROR: missing utility: %s\n' "$cmd" >&2; exit 2; }
+done
+wan=${OWRT_NETGUARD_WAN:-wan}
+case "$wan" in ''|*[!a-zA-Z0-9_.-]*) printf 'ERROR: unsafe WAN identifier\n' >&2; exit 2 ;; esac
+json=$(ubus call "network.interface.$wan" status 2>/dev/null) || {
+    printf 'ERROR: cannot read WAN status\n' >&2; exit 2
+}
+field() { printf '%s\n' "$json" | jsonfilter -e "$1" 2>/dev/null | head -n 1; }
+wan_up=$(field '@.up')
+wan_dev=$(field '@.l3_device')
+case "$wan_dev" in ''|*[!a-zA-Z0-9_.:@-]*) wan_dev=unknown ;; esac
+
+valid_ipv4() {
+    case "$1" in ''|*[!0-9.]*|.*|*.|*..*) return 1 ;; esac
+    saved_ifs=$IFS
+    IFS=.
+    set -- $1
+    IFS=$saved_ifs
+    [ "$#" -eq 4 ] || return 1
+    for octet in "$@"; do
+        case "$octet" in ''|*[!0-9]*) return 1 ;; esac
+        [ "${#octet}" -le 3 ] && [ "$octet" -ge 0 ] 2>/dev/null && [ "$octet" -le 255 ] 2>/dev/null || return 1
+    done
+}
+
+seen=' '
+count=0
+local_total=0; local_answer=0
+ru_total=0; ru_answer=0
+intl_total=0; intl_answer=0
+failed=0; skipped=0
+
+valid_target() {
+    entry=$1
+    bars=0; rest=$entry
+    while [ "${rest#*|}" != "$rest" ]; do
+        rest=${rest#*|}; bars=$((bars+1))
+    done
+    [ "$bars" -eq 3 ] || { printf 'ERROR: expected four fields\n' >&2; return 2; }
+    saved_ifs=$IFS; IFS='|'
+    read -r group name server domain <<INPUT
+$entry
+INPUT
+    IFS=$saved_ifs
+    case "$group" in local|ru|international) ;; *) printf 'ERROR: invalid group\n' >&2; return 2 ;; esac
+    case "$name" in ''|*[!a-zA-Z0-9_-]*) printf 'ERROR: invalid target name\n' >&2; return 2 ;; esac
+    [ "${#name}" -le 32 ] || { printf 'ERROR: target name too long\n' >&2; return 2; }
+    case "$seen" in *" $name "*) printf 'ERROR: duplicate target name\n' >&2; return 2 ;; esac
+    valid_ipv4 "$server" || { printf 'ERROR: invalid DNS resolver IPv4\n' >&2; return 2; }
+    case "$group:$server" in
+        local:127.0.0.1) ;;
+        local:*) printf 'ERROR: local target must use loopback 127.0.0.1\n' >&2; return 2 ;;
+        ru:127.*|international:127.*) printf 'ERROR: external target cannot use loopback\n' >&2; return 2 ;;
+    esac
+    case "$domain" in ''|*[!a-zA-Z0-9.-]*|.*|*.|*..*|*-.*|*.-*)
+        printf 'ERROR: invalid query domain\n' >&2; return 2 ;;
+        *.*) ;;
+        *) printf 'ERROR: query domain must be FQDN\n' >&2; return 2 ;;
+    esac
+    [ "${#domain}" -le 253 ] || { printf 'ERROR: query domain too long\n' >&2; return 2; }
+    seen="$seen$name "
+    count=$((count+1))
+    [ "$count" -le 8 ] || { printf 'ERROR: maximum 8 DNS targets\n' >&2; return 2; }
+}
+
+route_for() {
+    route=$(ip -4 route get "$1" 2>/dev/null) || { printf 'UNKNOWN'; return; }
+    case " $route " in *" dev $wan_dev "*) printf 'MATCHES_WAN' ;; *) printf 'OTHER_DEVICE' ;; esac
+}
+
+# nslookup's 'Server' header is not sufficient. Require A-address AFTER a
+# 'Name:' line; reject header-only or address-less diagnostic output.
+answer_has_a_record() {
+    printf '%s\n' "$1" | awk '
+        /^Name:/ { seen=1; next }
+        seen && /^Address( [0-9]+)?:[[:space:]]*/ {
+            line=$0
+            sub(/^Address( [0-9]+)?:[[:space:]]*/, "", line)
+            split(line, parts, /[[:space:]]/)
+            address=parts[1]
+            n=split(address, oct, ".")
+            if (n == 4) {
+                ok=1
+                for (i=1; i<=4; i++) {
+                    if (oct[i] !~ /^[0-9]+$/ || length(oct[i])>3 || oct[i]+0>255) ok=0
+                }
+                if (ok) valid=1
+            }
+        }
+        END { exit !valid }
+    '
+}
+
+probe() {
+    group=$1; name=$2; server=$3; domain=$4
+    if [ "$group" = local ]; then
+        local_total=$((local_total+1))
+        route_state=LOOPBACK
+    else
+        case "$group" in ru) ru_total=$((ru_total+1)) ;; international) intl_total=$((intl_total+1)) ;; esac
+        if [ "$wan_up" != true ] || [ "$wan_dev" = unknown ]; then
+            route_state=WAN_UNREADY
+        else
+            route_state=$(route_for "$server")
+        fi
+    fi
+    if [ "$group" != local ] && [ "$route_state" != MATCHES_WAN ]; then
+        skipped=$((skipped+1))
+        printf 'DNS_TARGET group=%s name=%s resolver=%s result=SKIPPED_ROUTE route_unmarked=%s\n' "$group" "$name" "$server" "$route_state"
+        return
+    fi
+    response=$(nslookup -timeout=3 -retry=1 -type=A "$domain" "$server" 2>/dev/null)
+    rc=$?
+    if [ "$rc" -eq 0 ] && answer_has_a_record "$response"; then
+        verdict=ANSWER
+        case "$group" in
+            local) local_answer=$((local_answer+1)) ;;
+            ru) ru_answer=$((ru_answer+1)) ;;
+            international) intl_answer=$((intl_answer+1)) ;;
+        esac
+    else
+        verdict=UNCONFIRMED
+        failed=$((failed+1))
+    fi
+    printf 'DNS_TARGET group=%s name=%s resolver=%s result=%s nslookup_rc=%s route_unmarked=%s\n' "$group" "$name" "$server" "$verdict" "$rc" "$route_state"
+}
+
+printf 'OWRT NetGuard — isolated DNS diagnostic (IPv4, read-only)\n'
+printf 'DNS_PROFILE name=%s wan=%s up=%s device=%s transport=UDP53_OR_SYSTEM_DEFINED\n' "$profile" "$wan" "$wan_up" "$wan_dev"
+
+run_list() {
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in ''|'#'*) continue ;; esac
+        # Apply filter BEFORE probing; all targets are validated below.
+        valid_target "$line" || return 2
+        if [ "$profile" != custom ]; then
+            case "$profile:$group" in
+                russia:international|international:ru) continue ;;
+            esac
+        fi
+        probe "$group" "$name" "$server" "$domain"
+    done
+    return 0
+}
+
+if [ -n "$file" ]; then
+    run_list < "$file" || exit 2
+else
+    run_list <<'DEFAULT_TARGETS' || exit 2
+local|loopback|127.0.0.1|example.com
+ru|yandex|77.88.8.8|example.com
+ru|skydns|193.58.251.251|example.com
+international|cloudflare|1.1.1.1|example.com
+international|google|8.8.8.8|example.com
+DEFAULT_TARGETS
+fi
+if [ "$count" -eq 0 ]; then printf 'ERROR: empty list\n' >&2; exit 2; fi
+printf 'DNS_GROUP local targets=%s answers=%s\n' "$local_total" "$local_answer"
+printf 'DNS_GROUP ru targets=%s answers=%s\n' "$ru_total" "$ru_answer"
+printf 'DNS_GROUP international targets=%s answers=%s\n' "$intl_total" "$intl_answer"
+printf 'DNS_SUMMARY failed=%s skipped=%s\n' "$failed" "$skipped"
+if [ "$local_answer" -gt 0 ] && { [ "$ru_answer" -gt 0 ] || [ "$intl_answer" -gt 0 ]; }; then
+    observation=LOCAL_AND_EXTERNAL_DNS_ANSWER_SAMPLED
+elif [ "$local_answer" -gt 0 ]; then
+    observation=LOCAL_DNS_ANSWER_SAMPLED
+elif [ "$ru_answer" -gt 0 ] || [ "$intl_answer" -gt 0 ]; then
+    observation=EXTERNAL_DNS_ANSWER_LOCAL_UNCONFIRMED
+else
+    observation=DNS_ANSWERS_UNCONFIRMED
+fi
+printf 'DNS_OBSERVATION: %s\n' "$observation"
+printf 'NOTE: Plain DNS can be blocked, intercepted or spoofed; an answer does not authenticate the resolver.\n'
+printf 'NOTE: Unmarked routing does not prove actual WAN egress; nslookup is not bound to WAN.\n'
+printf 'NOTE: DNS outcomes do not imply ISP outage and do not change HTTPS profile observations.\n'
