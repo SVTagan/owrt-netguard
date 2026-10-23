@@ -4,6 +4,14 @@
 set -eu
 
 script=${1:-./netguard-endpoint-survey}
+
+# The production target runs under BusyBox ash. Catch non-portable case
+# patterns and syntax errors before running the mocked endpoint scenarios.
+if ! sh -n "$script"; then
+    printf 'FAIL: endpoint survey has invalid POSIX shell syntax\n' >&2
+    exit 1
+fi
+
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 mkdir -p "$work/mock"
