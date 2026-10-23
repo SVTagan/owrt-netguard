@@ -18,6 +18,8 @@ This directory contains an **active, manually triggered** QEMU test harness for 
 
 **Next manually triggered regression (not yet run):** `netguard-profile-probe` and `tests/profile-probe.sh` are now copied into guest RAM, syntax-checked and exercised with deterministic mocks under OpenWrt BusyBox ash. New scenarios verify RU/intl isolation, possible allowlist-only access, pinned IPv4 success despite system DNS failure, strict response contracts and PBR route uncertainty. Local BusyBox ash/dash/bash suites passed; these new files are **not** part of prior successful run #3. The existing legacy `check` and procd lifecycle are unchanged.
 
+**Run #4 infrastructure failure, not a code-test failure (2026-10-23):** [GitHub Actions run #4](https://github.com/SVTagan/owrt-netguard/actions/runs/40029556683) stopped at `apk update` inside the disposable OpenWrt VM before any new offline test executed. The `x86_64/base/packages.adb` feed returned a `wget` transport error (`Operation not permitted`, incomplete index). The newly added `netguard-profile-probe` therefore **was not evaluated by that run**. Afterward, `tests/ci/openwrt-25.12-qemu.sh` was changed to run syntax + deterministic offline tests before any package installation and to attempt `apk update && apk add curl ca-bundle` up to 3 times with a short delay. If all attempts fail, CI still fails with an explicit infrastructure message; the failure is not silently treated as a passing product test. **The modified workflow has not yet been rerun.**
+
 Reference: https://openwrt.org/docs/guide-user/virtualization/qemu
 
 **Security:** Only use the default empty root password in the disposable, isolated test VM, never on a real Internet-exposed OpenWrt system.
