@@ -23,7 +23,7 @@ international|google|www.gstatic.com|auto|/generate_204|204|-'
                 allowlist) NG_PROFILE_TARGETS='ru_base|base|ya.ru|auto|/health|200|User-agent
 ru_diverse|selectel|selectel.ru|auto|/robots.txt|200|User-agent
 ru_diverse|timeweb|timeweb.com|auto|/robots.txt|200|User-agent' ;;
-                pinned) NG_PROFILE_TARGETS='ru_diverse|selectel|selectel.ru|192.0.2.5|/robots.txt|200|User-agent
+                pinned|dns_fail) NG_PROFILE_TARGETS='ru_diverse|selectel|selectel.ru|192.0.2.5|/robots.txt|200|User-agent
 ru_diverse|timeweb|timeweb.com|auto|/robots.txt|200|User-agent' ;;
                 pinned_mismatch) NG_PROFILE_TARGETS='ru_diverse|selectel|selectel.ru|203.0.113.5|/robots.txt|200|User-agent
 ru_diverse|timeweb|timeweb.com|auto|/robots.txt|200|User-agent' ;;
@@ -82,7 +82,7 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 [ "$interface" = 'if!wan' ] && [ "$noproxy" = '*' ] && [ "$proto" = '=https' ] && [ "$maxsize" = 32768 ] || exit 95
-if [ "${NG_TEST_MODE:-}" = pinned ] && [ "$url" = 'https://selectel.ru/robots.txt' ]; then
+if { [ "${NG_TEST_MODE:-}" = pinned ] || [ "${NG_TEST_MODE:-}" = dns_fail ]; } && [ "$url" = 'https://selectel.ru/robots.txt' ]; then
     [ "$resolve" = 'selectel.ru:443:192.0.2.5' ] || exit 96
 fi
 case "$url" in
@@ -94,8 +94,12 @@ case "$url" in
     *) name=unknown ;;
 esac
 case "${NG_TEST_MODE:-}:$name" in
-    blocked_international:google|all_fail:*|allowlist:selectel|allowlist:timeweb|partial:timeweb|intl_blocked:*|dns_fail:*)
+    blocked_international:google|all_fail:*|allowlist:selectel|allowlist:timeweb|partial:timeweb|intl_blocked:*)
         printf '000|-|0|4.000|0'; exit 28 ;;
+    dns_fail:timeweb|dns_fail:google)
+        printf '000|-|-|0.000|0'; exit 6 ;;
+    tls_failure:timeweb)
+        printf '000|-|18|0.200|0'; exit 60 ;;
     wrong_body:timeweb)
         [ "$out" = /dev/null ] || printf 'not-matching' > "$out"
         printf '200|192.0.2.6|0|0.200|12'; exit 0 ;;
@@ -156,6 +160,12 @@ assert 'result=BODY_LIMIT'
 assert 'PROFILE_OBSERVATION: RU_PARTIALLY_CONFIRMED'
 run pinned
 assert 'dns=PINNED result=MATCHED'
+run dns_fail
+assert 'dns=PINNED result=MATCHED'
+assert 'dns=SYSTEM result=DNS_FAILED'
+assert 'PROFILE_OBSERVATION: RU_PARTIALLY_CONFIRMED'
+run tls_failure
+assert 'dns=SYSTEM result=TLS_FAILED'
 run pinned_mismatch
 assert 'result=SKIPPED_ROUTE route_unmarked=OTHER_DEVICE'
 assert 'PROFILE_OBSERVATION: RU_PARTIALLY_CONFIRMED'
