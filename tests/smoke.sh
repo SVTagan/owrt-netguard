@@ -37,11 +37,11 @@ MOCK
 
 cat > "$work/ubus" <<'MOCK'
 #!/bin/sh
-if [ "${NETGUARD_TEST_SCENARIO:-}" = wan_no_l3 ]; then
-    printf '%s\n' '{"up":false,"device":"wan"}'
-else
-    printf '%s\n' '{"up":true,"l3_device":"wan","device":"wan"}'
-fi
+case "${NETGUARD_TEST_SCENARIO:-}" in
+    wan_no_l3) printf '%s\n' '{"up":false,"pending":false,"device":"wan"}'; exit 0 ;;
+    wan_initializing) printf '%s\n' '{"up":false,"pending":true,"available":true,"device":"wan"}'; exit 0 ;;
+esac
+printf '%s\n' '{"up":true,"pending":false,"available":true,"l3_device":"wan","device":"wan"}'
 MOCK
 
 cat > "$work/jsonfilter" <<'MOCK'
@@ -51,7 +51,9 @@ while [ "$#" -gt 0 ]; do
 done
 case "$key" in
     '@.up') echo true ;;
-    '@.l3_device') [ "${NETGUARD_TEST_SCENARIO:-}" = wan_no_l3 ] || echo wan ;;
+    '@.pending') [ "${NETGUARD_TEST_SCENARIO:-}" = wan_initializing ] && echo true || echo false ;;
+    '@.available') echo true ;;
+    '@.l3_device') case "${NETGUARD_TEST_SCENARIO:-}" in wan_no_l3|wan_initializing) ;; *) echo wan ;; esac ;;
     '@.device') echo wan ;;
 esac
 MOCK
@@ -173,6 +175,7 @@ run http_restricted PARTIAL_REACHABILITY
 run one_good PARTIAL_REACHABILITY
 run external_dns_down EXTERNAL_DNS_UNCONFIRMED
 run wan_no_l3 WAN_NO_L3
+run wan_initializing WAN_INITIALIZING
 run custom_pool HEALTHY_SAMPLED
 run custom_dns HEALTHY_SAMPLED
 run custom_partial PARTIAL_REACHABILITY
