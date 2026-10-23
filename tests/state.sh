@@ -107,6 +107,21 @@ feed PROBE_ERROR '' UNKNOWN NONE
 feed PROBE_ERROR '' UNKNOWN NONE
 feed HEALTHY_SAMPLED '' HEALTHY NONE
 
+# netifd setup and the bounded service grace are not failures.
+ng_reset
+feed STARTUP_WAIT '' STARTUP NONE
+feed WAN_INITIALIZING '' STARTUP NONE
+feed HEALTHY_SAMPLED '' HEALTHY NONE
+
+# After the worker grace expires, a WAN without L3 is diagnosed normally.
+feed WAN_NO_L3 '' SUSPECT NONE
+feed WAN_NO_L3 '' SUSPECT NONE
+feed WAN_NO_L3 'OPEN 1 WAN' OPEN WAN
+# A later interface reconfiguration does not fabricate a recovery event.
+feed WAN_INITIALIZING '' OPEN WAN
+feed HEALTHY_SAMPLED '' RECOVERING WAN
+feed HEALTHY_SAMPLED 'RESOLVED 1 WAN' HEALTHY NONE
+
 # Invalid status must be rejected without changing incident state.
 phase_before=$ng_phase
 if ng_step INVALID_RESULT > "$work/event"; then
