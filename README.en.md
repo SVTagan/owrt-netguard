@@ -104,6 +104,14 @@ cat /tmp/netguard-runtime/status
 
 Current copies of `/tmp/owrt-netguard` and `/tmp/netguard-state.sh` are required. The `--forever` mode is intended solely for an explicitly enabled future procd service; **do not use it on a production router yet**. Offline tests: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. The [procd lifecycle test](tests/ci/procd-guest.sh) passed in QEMU/OpenWrt 25.12.5 (disabled start, explicit enable, RAM snapshot, stop and restart). The second QEMU run passed the new startup-grace scenarios.
 
+### Separate DNS diagnostics (experimental)
+
+The manual [`netguard-dns-probe`](netguard-dns-probe) is **not part of legacy check or the worker**. It queries local DNS at `127.0.0.1`, experimental Russian resolvers (Yandex, SkyDNS), and optional international resolvers (Cloudflare, Google), with `--profile russia|international|all|custom`. A user-controlled `--file /tmp/targets` allows up to eight strictly validated DNS targets.
+
+Unlike a resolver-banner check, each `nslookup` requires an actual A-record response for `example.com`. Group observations `ANSWER`, `UNCONFIRMED` and `SKIPPED_ROUTE` are **not proof of resolver authenticity, direct WAN path or an ISP outage**. Plain UDP DNS may be intercepted or blocked, especially at foreign destinations in Russia. Unmarked route lookup cannot rule out nftables/PBR interception. A failed lookup against loopback does not automatically imply every local DNS mechanism failed.
+
+This is a manual read-only tool that never changes DNS, routes, UCI, firewall or running services. See [DNS diagnostics limitations](docs/dns-probe.md). Deterministic [tests](tests/dns-probe.sh) passed locally in BusyBox `ash`, `dash` and `bash` and are wired into manual QEMU regression. **The DNS module has not yet been tested in QEMU or on physical AX6000.**
+
 ### Grouped HTTPS profile diagnostics: experimental manual mode
 
 The new isolated [`netguard-profile-probe`](netguard-profile-probe) consumes validated profiles without changing legacy `owrt-netguard check`, procd or the worker. It sends bounded HTTPS GET probes, checks TLS verification, expected HTTP codes and optional body tokens, and reports **separate evidence** for `ru_base`, `ru_diverse` and `international`.
