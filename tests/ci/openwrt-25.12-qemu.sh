@@ -120,6 +120,9 @@ ssh_guest 'sh /tmp/netguard-dns-probe-test.sh /tmp/netguard-dns-probe'
 echo "== Validate preview profile using real guest UCI, not just mocks =="
 ssh_guest 'mkdir -p /tmp/netguard-profile-preview && cp /tmp/netguard-profiles-preview /tmp/netguard-profile-preview/netguard && OWRT_NETGUARD_CONFIG_DIR=/tmp/netguard-profile-preview NETGUARD_PROFILES_LIB=/tmp/netguard-profiles.sh sh /tmp/netguard-profiles show > /tmp/netguard-profile-preview.out && grep -q "^PROFILE selected=russia source=uci+uci-targets targets=2$" /tmp/netguard-profile-preview.out && grep -q "^GROUP_COUNTS ru_base=0 ru_diverse=2 international=0$" /tmp/netguard-profile-preview.out && cat /tmp/netguard-profile-preview.out'
 
+echo "== WAN-only must reject DNS-dependent profiles with real guest UCI =="
+ssh_guest 'OWRT_NETGUARD_CONFIG_DIR=/tmp/netguard-profile-preview NETGUARD_PROFILES_LIB=/tmp/netguard-profiles.sh NETGUARD_PROFILE_PROBE=/tmp/netguard-profile-probe sh /tmp/netguard-wan-check check >/tmp/netguard-wan-auto-rejected.txt 2>&1; rc=$?; test "$rc" -eq 2 && grep -q "refuses system-DNS target" /tmp/netguard-wan-auto-rejected.txt'
+
 echo "== Install curl dependency inside disposable VM (bounded retry) =="
 # Network package feeds can fail transiently even when local tests pass.
 # Run offline tests first; retries do not hide a persistent infra failure.
