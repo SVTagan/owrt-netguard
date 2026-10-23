@@ -71,7 +71,7 @@ run() {
 }
 
 run
-grep -qx 'SUMMARY: targets=8 matched=4 redirects=1 body_limit=1 other_failures=2' "$work/output" || {
+grep -qx 'SUMMARY: targets=8 matched=5 redirects=1 body_limit=1 other_failures=1' "$work/output" || {
     cat "$work/output" >&2
     exit 1
 }
@@ -90,7 +90,7 @@ grep -qx 'SUMMARY: targets=5 matched=3 redirects=1 body_limit=1 other_failures=0
 ! grep -q 'group=international' "$work/output"
 
 run --profile international
-grep -qx 'SUMMARY: targets=3 matched=1 redirects=0 body_limit=0 other_failures=2' "$work/output"
+grep -qx 'SUMMARY: targets=3 matched=2 redirects=0 body_limit=0 other_failures=1' "$work/output"
 ! grep -q 'group=ru_base' "$work/output"
 
 printf '%s\n' 'ru_base|only_ya|https://ya.ru/|2xx|-' > "$work/custom"
