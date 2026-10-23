@@ -104,6 +104,24 @@ cat /tmp/netguard-runtime/status
 
 Current copies of `/tmp/owrt-netguard` and `/tmp/netguard-state.sh` are required. The `--forever` mode is intended solely for an explicitly enabled future procd service; **do not use it on a production router yet**. Offline tests: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. The [procd lifecycle test](tests/ci/procd-guest.sh) passed in QEMU/OpenWrt 25.12.5 (disabled start, explicit enable, RAM snapshot, stop and restart). The second QEMU run passed the new startup-grace scenarios.
 
+### Exploratory regional endpoint survey
+
+A separate manual [`netguard-endpoint-survey`](netguard-endpoint-survey) tool gathers evidence for choosing future RU and international endpoints. Its targets are **candidates, not approved monitoring defaults**. Russian sites may redirect, change IP addresses or exceed the download limit, and overseas targets may be intentionally blocked on some networks. None of these observations alone proves an ISP outage.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/SVTagan/owrt-netguard/main/netguard-endpoint-survey -o /tmp/netguard-endpoint-survey
+sh -n /tmp/netguard-endpoint-survey
+sh /tmp/netguard-endpoint-survey --profile all
+```
+
+The survey accepts `--profile ru` (five websites grouped as `ru_base`: `ya.ru`, `mail.ru`; `ru_diverse`: `reg.ru`, `nic.ru`, `timeweb.com`) and `--profile international` (the three proven VPN Failover probe URLs at Google gstatic, Apple and Mozilla, using their respective HTTP/body contracts). **These are survey filters, not yet production NetGuard profiles**.
+
+The script uses IPv4, `curl --interface if!<wan-device> --noproxy '*'` with TLS verification, and reports `remote_ip`, HTTP status, timing, response size and the **unmarked** route to the resolved IP. It uses the router's existing DNS; it does not follow redirects, and bounds individual transfers to 8 seconds and 128 KiB. `REDIRECT`, `BODY_LIMIT`, `CONTRACT_MISMATCH` and `ERROR` are distinct observations, none of which proves an ISP outage. Even `MATCHED` validates only this endpoint's HTTP/TLS contract — it cannot establish a conclusively direct WAN path through nftables/PBR.
+
+For custom research targets, use `--file /tmp/targets` with lines in `group|name|https://host/path|expected_http|expected_body` format. Groups are `ru_base`, `ru_diverse`, `international`; HTTP expectations are `200`, `204`, `2xx`, `any`; use `-` for no body token. There is a 16-target maximum. The tool never modifies the file. Proposed production UCI profiles `Russia`/`International`/`Custom` are **not yet implemented**.
+
+This one-shot tool does not start services, change DNS, UCI, firewall rules or routes, or write persistent logs. It sends HTTPS GET requests to the listed public sites and uses a temporary RAM file for expected response-token checks. The deterministic test `sh tests/endpoint-survey.sh ./netguard-endpoint-survey` is wired into the manual OpenWrt 25.12 QEMU workflow but **has not yet been executed there**.
+
 ### Experimental WAN path audit
 
 A separate manual [`netguard-path-audit`](netguard-path-audit) command now gathers **read-only routing evidence**, not proof of the route followed by any individual packet. It does not depend on Podkop or other third-party software: it reads standard OpenWrt `ubus`, `jsonfilter`, `ip` output and optional `nft` rules. It **does not change** interfaces, routes or firewall rules.
