@@ -13,6 +13,9 @@ This directory contains an **active, manually triggered** QEMU test harness for 
 
 **Pending rerun:** After successful run #2, the repository gained `netguard-path-audit` and `tests/path-audit.sh`. Their syntax and deterministic scenarios are wired into the next manual QEMU run, but are not covered by run #2. The audit does not capture or trace actual WAN packets. The repo now also contains `netguard-endpoint-survey` and its mock tests, added after run #2. Neither tool has yet passed a new QEMU regression; the survey does not run real target checks in CI.
 
+
+**Pending profile regression:** The new standalone `netguard-profiles` CLI, `lib/netguard-profiles.sh` UCI loader, `tests/profiles.sh` and the preview sample are staged for the next manual QEMU run. Local offline tests have passed in BusyBox ash 1.37, dash and bash; this does **not** imply that the new UCI parser has passed a real OpenWrt UCI test or a real router test. Legacy `check` and procd worker remain unchanged.
+
 Reference: https://openwrt.org/docs/guide-user/virtualization/qemu
 
 **Security:** Only use the default empty root password in the disposable, isolated test VM, never on a real Internet-exposed OpenWrt system.
