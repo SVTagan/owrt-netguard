@@ -24,6 +24,8 @@ This directory contains an **active, manually triggered** QEMU test harness for 
 
 **DNS regression (run #6: PASS):** [Run #6](https://github.com/SVTagan/owrt-netguard/actions/runs/40032413103) passed the isolated `netguard-dns-probe` syntax and deterministic mocked DNS/router tests in OpenWrt 25.12.5 BusyBox `ash`, before apk installation, together with all prior regressions and real legacy `HEALTHY_SAMPLED`/procd checks. The isolated DNS command was subsequently tested on physical AX6000/OpenWrt 24.10.5: localhost, Yandex and SkyDNS all returned `ANSWER` in the `russia` profile. These results do not prove the identity of external resolvers, DoH health or direct WAN delivery. Passing mocks does not prove that plaintext UDP/53 reaches the intended server or that DNS failure implies ISP failure.
 
+**Next WAN-only regression (not yet run):** New opt-in `netguard-wan-check` + `tests/wan-check.sh` are now included in guest-RAM copy, OpenWrt BusyBox syntax checks and deterministic smoke suite **before apk**. It enforces pinned-IP-only, two-primary-target quorum, ignores allowlist-only success for RU health, and maps errors into the existing worker `RESULT:` contract. The grouped profile sampler also now begins both curl variants with `-q` and rejects a successful pinned transfer when `remote_ip` differs from the requested pinned IPv4. Legacy `owrt-netguard check`, worker, state library and procd script remain unchanged. This new revision **has not been run in QEMU**, and there is **no physical AX6000 test yet**.
+
 Reference: https://openwrt.org/docs/guide-user/virtualization/qemu
 
 **Security:** Only use the default empty root password in the disposable, isolated test VM, never on a real Internet-exposed OpenWrt system.
