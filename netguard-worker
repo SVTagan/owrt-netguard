@@ -203,7 +203,7 @@ while :; do
     ng_step "$effective_result"
     snapshot 1 || exit 2
     if [ "$mode" = bounded ]; then
-        printf 'STATE phase=%s result=%s\n' "$ng_phase" "$result"
+        printf 'STATE phase=%s result=%s observed=%s\n' "$ng_phase" "$effective_result" "$raw_result"
     fi
     if [ "$cycles" -gt 0 ] && [ "$cycle" -ge "$cycles" ]; then
         break
