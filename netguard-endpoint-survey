@@ -126,7 +126,10 @@ survey() {
         # Avoid shell parsing of ampersands inside case bracket expressions:
         # older BusyBox ash versions reject that syntax. The regex is single-
         # quoted and the candidate URL is always passed as data, never eval'd.
-        if ! printf '%s\n' "$url" | LC_ALL=C grep -Eq '^[A-Za-z0-9._~:/?&=%+#-]+
+        if ! printf '%s\n' "$url" | LC_ALL=C grep -Eq '^[A-Za-z0-9._~:/?&=%+#-]+$'; then
+            printf 'ERROR: invalid characters in HTTPS URL\n' >&2
+            return 2
+        fi
         case "$expected" in 200|204|2xx|any) ;; *)
             printf 'ERROR: invalid expected HTTP contract\n' >&2; return 2 ;;
         esac
