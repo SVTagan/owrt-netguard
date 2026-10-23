@@ -40,7 +40,7 @@ Statuses include `HEALTHY_SAMPLED` (only the sampled paths), `WAN_INITIALIZING` 
 
 **Limitations:** IPv4 only; HTTPS/DNS endpoints can already be configured through UCI. Failure of all selected endpoints does not prove an ISP outage or a payment-related restriction. Captive-portal classification is not yet implemented. `curl --interface`, pinned IPs and unmarked routing do not prove bypass of nftables/PBR, and external DNS probes are not strictly WAN-bound. Incident history, notifications and Recovery are not implemented. Previous hardware tests passed on AX6000/OpenWrt 24.10.5; the startup changes passed a three-cycle bounded worker field test on AX6000/OpenWrt 24.10.5.
 
-The manual [OpenWrt 25.12.5 QEMU workflow](tests/ci/README.md) is active. [Run #1](https://github.com/SVTagan/owrt-netguard/actions/runs/38820425380), [run #2](https://github.com/SVTagan/owrt-netguard/actions/runs/39973225284), and [run #3](https://github.com/SVTagan/owrt-netguard/actions/runs/39990869415) passed. Run #3 covered 16 smoke cases, 55 state transitions, worker, real procd lifecycle, WAN path audit, endpoint survey, and **actual OpenWrt UCI** profile validation. The updated worker already passed a bounded AX6000 field check, but the new profile loader has not; no physical OpenWrt 25.12 hardware test has taken place.
+The manual [OpenWrt 25.12.5 QEMU workflow](tests/ci/README.md) is active. [Run #1](https://github.com/SVTagan/owrt-netguard/actions/runs/38820425380), [run #2](https://github.com/SVTagan/owrt-netguard/actions/runs/39973225284), [run #3](https://github.com/SVTagan/owrt-netguard/actions/runs/39990869415), and [run #5](https://github.com/SVTagan/owrt-netguard/actions/runs/40030153822) passed. Run #4 failed before executing product tests because of an apk repository network error. Run #3 covered 16 smoke cases, 55 state transitions, worker, real procd lifecycle, WAN path audit, endpoint survey, and **actual OpenWrt UCI** profile validation. The updated worker and profile loader have passed AX6000 field checks. The grouped HTTPS profile probe passed simulated QEMU tests in run #5 but has not yet been field-tested on AX6000; no physical OpenWrt 25.12 hardware test has taken place.
 
 ### Custom probe targets (optional)
 
@@ -112,7 +112,7 @@ All `PROFILE_OBSERVATION` results — including `RU_REACHABLE_SAMPLED`, `RU_PART
 
 The manual tool requires an explicitly selected profile or preview UCI setting and rejects legacy mode. It changes no DNS, UCI, firewall, route or service configuration. A maximum of 12 endpoints can be queried, each with an 8-second deadline and 32-KiB response cap. It is **not part of the recurring worker**.
 
-Local deterministic [tests](tests/profile-probe.sh) passed under BusyBox `ash`, `dash`, `bash`, covering international filtering with healthy RU targets, allowlist-only access, bad HTTP bodies, redirect, DNS failure with successful pinned HTTPS, route mismatch and TLS errors. The tests are wired into the manual QEMU workflow but **have not yet been executed there**, and the grouped probe has not yet been field-tested on AX6000. See [design and test boundaries](docs/endpoint-profiles.md).
+Local deterministic [tests](tests/profile-probe.sh) passed under BusyBox `ash`, `dash`, `bash`, covering international filtering with healthy RU targets, allowlist-only access, bad HTTP bodies, redirect, DNS failure with successful pinned HTTPS, route mismatch and TLS errors. The grouped-probe scenarios **passed [QEMU run #5](https://github.com/SVTagan/owrt-netguard/actions/runs/40030153822)**, but real grouped HTTPS requests have not yet been field-tested on AX6000. See [design and test boundaries](docs/endpoint-profiles.md).
 
 ### Endpoint profiles: experimental configuration loader
 
@@ -122,7 +122,7 @@ Explicit profiles: `russia` (two research RU candidates: Selectel and Timeweb), 
 
 The [`examples/netguard-profiles.preview`](examples/netguard-profiles.preview) UCI sample is **for inspection in /tmp only**. Do not install it in `/etc/config/netguard`: the main diagnostic engine does not yet consume profile fields and would continue using legacy defaults. With no selected profile, inspection reports `LEGACY_UNCHANGED`. See [`docs/endpoint-profiles.md`](docs/endpoint-profiles.md) for the design contract.
 
-Local offline [`tests/profiles.sh`](tests/profiles.sh) cases passed under BusyBox `ash` 1.37, `dash` and `bash`. The suite also **passed QEMU run #3**, including real OpenWrt UCI parsing. The new loader has not been field-tested on the AX6000.
+Local offline [`tests/profiles.sh`](tests/profiles.sh) cases passed under BusyBox `ash` 1.37, `dash` and `bash`. The suite also **passed QEMU run #3**, including real OpenWrt UCI parsing. The profile loader passed a read-only AX6000/OpenWrt 24.10.5 test with temporary UCI data in `/tmp`; the grouped HTTPS probe has not yet been field-tested.
 
 ### Exploratory regional endpoint survey
 
