@@ -26,6 +26,12 @@ case "$NETGUARD_TEST_SCENARIO" in
         exit 2 ;;
     startup_failure) result=WAN_NO_L3 ;;
     netifd_pending) result=WAN_INITIALIZING ;;
+    healthy_then_fault)
+        if [ "$n" -eq 1 ]; then
+            result=HEALTHY_SAMPLED
+        else
+            result=WAN_NO_L3
+        fi ;;
     *) result=HEALTHY_SAMPLED ;;
 esac
 printf 'RESULT: %s\n' "$result"
@@ -40,6 +46,7 @@ run() {
     scenario=$1
     cycles=$2
     grace=${3:-0}
+    interval=${4:-0}
     mkdir -p "$tmp/$scenario"
     printf '0\n' > "$tmp/counter"
     NETGUARD_STARTUP_GRACE="$grace" \
@@ -48,7 +55,7 @@ run() {
     NETGUARD_CHECK_PATH="$tmp/fake-check" \
     NETGUARD_STATE_PATH="$library" \
     NETGUARD_RUNTIME_DIR="$tmp/$scenario" \
-        sh "$worker" --cycles "$cycles" 0 > "$tmp/$scenario.log"
+        sh "$worker" --cycles "$cycles" "$interval" > "$tmp/$scenario.log"
     [ "$(cat "$tmp/counter")" -eq "$cycles" ]
     [ -f "$tmp/$scenario/status" ]
     grep -qx 'running=0' "$tmp/$scenario/status"
@@ -87,6 +94,18 @@ run netifd_pending 3 0
 grep -qx 'OPEN 1 WAN' "$tmp/netifd_pending.log"
 grep -qx 'result=WAN_NO_L3' "$tmp/netifd_pending/status"
 grep -qx 'observed_result=WAN_INITIALIZING' "$tmp/netifd_pending/status"
+
+# Wall-clock-independent monotonic deadline: setup may not remain STARTUP
+# indefinitely. The deadline uses /proc/uptime and becomes WAN_NO_L3.
+run netifd_pending 4 1 1
+grep -qx 'OPEN 1 WAN' "$tmp/netifd_pending.log"
+grep -qx 'phase=OPEN' "$tmp/netifd_pending/status"
+
+# A first confirmed healthy sample ends startup grace immediately;
+# subsequent WAN loss must not be hidden behind another 90-second wait.
+run healthy_then_fault 4 90
+grep -qx 'OPEN 1 WAN' "$tmp/healthy_then_fault.log"
+grep -qx 'phase=OPEN' "$tmp/healthy_then_fault/status"
 
 run internal_failure 3
 grep -qx 'phase=UNKNOWN' "$tmp/internal_failure/status"
