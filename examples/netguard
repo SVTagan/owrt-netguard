@@ -19,6 +19,9 @@ config netguard 'main'
     # Background service is opt-in even when its init script is installed.
     option monitor_enabled '0'
     option interval '30'
+    # Wait for generic WAN/network initialization, never for optional addons.
+    # 0 disables startup grace; supported range: 0..300 seconds.
+    option startup_grace '90'
     option wan 'wan'
 
     list https 'yandex|77.88.8.88|safe.dot.dns.yandex.net|/|-'
