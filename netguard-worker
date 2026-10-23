@@ -34,6 +34,23 @@ else
     [ "$cycles" -ge 1 ] 2>/dev/null && [ "$cycles" -le 30 ] 2>/dev/null || exit 2
 fi
 
+# The service has a bounded warm-up period after process startup.
+# Manual bounded runs retain their historical immediate-diagnosis behavior
+# unless NETGUARD_STARTUP_GRACE is explicitly supplied.
+if [ "$mode" = forever ]; then
+    default_grace=90
+else
+    default_grace=0
+fi
+startup_grace=${NETGUARD_STARTUP_GRACE:-$default_grace}
+case "$startup_grace" in
+    ''|*[!0-9]*) printf 'ERROR: startup grace must be 0..300 seconds\n' >&2; exit 2 ;;
+esac
+[ "$startup_grace" -le 300 ] 2>/dev/null || {
+    printf 'ERROR: startup grace must be 0..300 seconds\n' >&2
+    exit 2
+}
+
 check_script=${NETGUARD_CHECK_PATH:-/usr/bin/owrt-netguard}
 state_lib=${NETGUARD_STATE_PATH:-/usr/lib/netguard/netguard-state.sh}
 runtime_dir=${NETGUARD_RUNTIME_DIR:-/tmp/netguard-runtime}
@@ -64,6 +81,9 @@ child_pid=
 check_rc=2
 result=PROBE_ERROR
 cycle=0
+raw_result=PROBE_ERROR
+startup_remaining=0
+startup_active=0
 
 uptime_seconds() {
     if [ -r /proc/uptime ]; then
@@ -85,6 +105,9 @@ snapshot() {
         printf 'incident_id=%s\n' "$ng_incident"
         printf 'cycle=%s\n' "$cycle"
         printf 'sample_uptime_s=%s\n' "$(uptime_seconds)"
+        printf 'observed_result=%s\n' "$raw_result"
+        printf 'startup_grace_s=%s\n' "$startup_grace"
+        printf 'startup_remaining_s=%s\n' "$startup_remaining"
     } > "$temp"
     mv -f "$temp" "$status_file"
 }
@@ -100,6 +123,15 @@ handle_stop() {
     exit 0
 }
 trap 'handle_stop' TERM INT
+
+started_uptime=$(uptime_seconds)
+case "$started_uptime" in
+    ''|*[!0-9]*) started_uptime=0; startup_grace=0 ;;
+esac
+if [ "$startup_grace" -gt 0 ]; then
+    startup_active=1
+    startup_remaining=$startup_grace
+fi
 
 snapshot 1 || exit 2
 if [ "$mode" = bounded ]; then
@@ -133,12 +165,41 @@ while :; do
         result=PROBE_ERROR
     fi
 
+    # The grace timer is based on monotonic /proc/uptime, not wall clock.
+    # Startup is independent of Podkop, VPN, DNS resolvers and other services.
+    raw_result=$result
+    effective_result=$result
+    startup_remaining=0
+    if [ "$startup_active" -eq 1 ]; then
+        now_uptime=$(uptime_seconds)
+        case "$now_uptime" in
+            ''|*[!0-9]*) elapsed=$startup_grace ;;
+            *) elapsed=$((now_uptime - started_uptime)) ;;
+        esac
+        [ "$elapsed" -ge 0 ] || elapsed=0
+        if [ "$raw_result" = HEALTHY_SAMPLED ]; then
+            startup_active=0
+        elif [ "$elapsed" -lt "$startup_grace" ]; then
+            effective_result=STARTUP_WAIT
+            startup_remaining=$((startup_grace - elapsed))
+        else
+            startup_active=0
+        fi
+    fi
+
+    # Once grace expires, persistent WAN setup is a missing-L3 symptom,
+    # rather than an endless STARTUP state. Not proof of ISP failure.
+    if [ "$startup_active" -eq 0 ] && [ "$raw_result" = WAN_INITIALIZING ]; then
+        effective_result=WAN_NO_L3
+    fi
+
     # Only bounded manual tests print each sample; the procd mode emits
     # transitions only so the router log is not flooded.
     if [ "$mode" = bounded ]; then
-        printf 'SAMPLE %s/%s result=%s check_exit=%s\n' "$cycle" "$cycles" "$result" "$check_rc"
+        printf 'SAMPLE %s/%s result=%s effective=%s check_exit=%s\n' \
+            "$cycle" "$cycles" "$raw_result" "$effective_result" "$check_rc"
     fi
-    ng_step "$result"
+    ng_step "$effective_result"
     snapshot 1 || exit 2
     if [ "$mode" = bounded ]; then
         printf 'STATE phase=%s result=%s\n' "$ng_phase" "$result"
