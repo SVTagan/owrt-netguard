@@ -110,7 +110,7 @@ The manual [`netguard-dns-probe`](netguard-dns-probe) is **not part of legacy ch
 
 Unlike a resolver-banner check, each `nslookup` requires an actual A-record response for `example.com`. Group observations `ANSWER`, `UNCONFIRMED` and `SKIPPED_ROUTE` are **not proof of resolver authenticity, direct WAN path or an ISP outage**. Plain UDP DNS may be intercepted or blocked, especially at foreign destinations in Russia. Unmarked route lookup cannot rule out nftables/PBR interception. A failed lookup against loopback does not automatically imply every local DNS mechanism failed.
 
-This is a manual read-only tool that never changes DNS, routes, UCI, firewall or running services. See [DNS diagnostics limitations](docs/dns-probe.md). Deterministic [tests](tests/dns-probe.sh) passed locally in BusyBox `ash`, `dash` and `bash`, and in [OpenWrt 25.12.5 QEMU run #6](https://github.com/SVTagan/owrt-netguard/actions/runs/40032413103). The isolated DNS probe has not yet been field-tested on physical AX6000.
+This is a manual read-only tool that never changes DNS, routes, UCI, firewall or running services. See [DNS diagnostics limitations](docs/dns-probe.md). Deterministic [tests](tests/dns-probe.sh) passed locally in BusyBox `ash`, `dash` and `bash`, and in [OpenWrt 25.12.5 QEMU run #6](https://github.com/SVTagan/owrt-netguard/actions/runs/40032413103). The isolated DNS probe subsequently passed a physical AX6000/OpenWrt 24.10.5 read-only test: loopback `127.0.0.1`, Yandex and SkyDNS all returned `ANSWER`, with `failed=0` and `skipped=0`. This does **not** authenticate external resolvers or verify DoH and the actual UDP/53 packet path.
 
 ### Grouped HTTPS profile diagnostics: experimental manual mode
 
