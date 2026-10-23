@@ -12,9 +12,9 @@ Although the original problem involved Podkop and VPNs, I did not want to build 
 
 ## Status
 
-**An experimental `owrt-netguard check` prototype is now available in the repository. There is no stable release or installer yet.**
+**The repository now includes an experimental IPv4 check, an in-memory incident state machine, a manual monitor and a procd-compatible worker. There is no stable release or installer yet.**
 
-This is a manual, one-shot IPv4 diagnostic tool, not a background monitor. It reads OpenWrt state and performs network probes without restarting services or changing DNS, firewall rules, or routing.
+`owrt-netguard check` provides one-shot IPv4 diagnostics. The separate `netguard-worker` supports periodic polling but is not installed or started automatically; it remains disabled by default. Neither changes DNS, firewall rules, routing or other services.
 
 ### Try the prototype
 
@@ -36,11 +36,11 @@ The prototype uses `ubus`, `jsonfilter`, `ip`, `curl`, `nslookup` with built-in 
 
 Current features: WAN state, several HTTPS probes using explicitly pinned IPs and TLS validation, plus multiple external DNS resolvers. **TLS/HTTP server reachability and a healthy endpoint response are distinct**: for example, Yandex returning HTTP 404 confirms a server response but is not counted as a healthy endpoint. Strict endpoint checks currently use Cloudflare (`/cdn-cgi/trace`, HTTP 200) and the Google DNS API (`/resolve?name=example.com&type=A`, HTTP 200); Yandex and Quad9 are transport-only probes until stable response contracts have been confirmed. Additional HTTPS checks stop after two valid health responses, and DNS checks after two answers. More targets are checked when needed.
 
-Statuses include `HEALTHY_SAMPLED` (only the sampled paths, not the entire Internet), `PARTIAL_REACHABILITY`, `WAN_NO_L3`, `LOCAL_DNS_UNAVAILABLE`, `EXTERNAL_DNS_UNCONFIRMED`, `DNS_PATH_UNCONFIRMED` and `UNKNOWN_ROUTE`. Failed or skipped probes prevent an unconditional healthy result.
+Statuses include `HEALTHY_SAMPLED` (only the sampled paths), `WAN_INITIALIZING` (netifd is configuring WAN), `WAN_NO_L3`, `PARTIAL_REACHABILITY`, `LOCAL_DNS_UNAVAILABLE`, `EXTERNAL_DNS_UNCONFIRMED`, `DNS_PATH_UNCONFIRMED` and `UNKNOWN_ROUTE`. Failed or skipped probes prevent an unconditional healthy result.
 
-**Limitations:** IPv4 only. The endpoint list is currently hard-coded; user-controlled UCI configuration is planned. Endpoint reachability in Crimea and other networks remains unverified. Failure of all selected endpoints does not prove an ISP outage. `--interface` and an unmarked route lookup cannot rule out all nftables/PBR interception, and external `nslookup` traffic is not strictly bound to WAN. Incident history, notifications and Recovery are not implemented. The **previous** prototype ran successfully on a physical AX6000 with OpenWrt 24.10.5; these latest changes still require retesting.
+**Limitations:** IPv4 only; HTTPS/DNS endpoints can already be configured through UCI. Failure of all selected endpoints does not prove an ISP outage or a payment-related restriction. Captive-portal classification is not yet implemented. `curl --interface`, pinned IPs and unmarked routing do not prove bypass of nftables/PBR, and external DNS probes are not strictly WAN-bound. Incident history, notifications and Recovery are not implemented. Previous hardware tests passed on AX6000/OpenWrt 24.10.5; the latest startup changes have not yet been field-tested.
 
-An [OpenWrt 25.12.5 QEMU test harness](tests/ci/README.md) has been prepared for manual GitHub Actions runs, but has not been activated or executed. No physical OpenWrt 25.12 hardware test has taken place.
+The manual [OpenWrt 25.12.5 QEMU workflow](tests/ci/README.md) is active. Its [first run passed](https://github.com/SVTagan/owrt-netguard/actions/runs/38820425380): 15 network smoke tests, 46 incident transitions, worker tests and real procd lifecycle. **The latest startup changes have not yet been retested.** No physical OpenWrt 25.12 hardware test has taken place.
 
 ### Custom probe targets (optional)
 
@@ -64,7 +64,7 @@ OWRT_NETGUARD_CONFIG_DIR=/tmp/netguard-config sh /tmp/owrt-netguard check
 
 **Limitation:** service-provider portals, captive portals and allowlisted sites may remain reachable when general Internet access is restricted. The prototype does **not yet classify limited-access probes**. Do not include them as ordinary HTTP 200 health checks or they could produce a false `HEALTHY_SAMPLED`.
 
-Offline smoke tests: `sh tests/smoke.sh ./owrt-netguard` (15 modeled scenarios, including invalid UCI data).
+Offline smoke tests: `sh tests/smoke.sh ./owrt-netguard` (16 scenarios, including pending WAN setup and invalid UCI data).
 
 ### Experimental incident correlation
 
@@ -83,13 +83,13 @@ sh /tmp/netguard-monitor 3 10
 
 The monitor requires an explicit number of cycles (1–30). The interval defaults to 30 seconds. Output includes `SAMPLE`, `STATE` and transition events `OPEN`, `RECLASSIFIED` and `RESOLVED`. Diagnostic command errors become `PROBE_ERROR` instead of being mistaken for proven network outages. Incident state exists **only within the running process**.
 
-Tests: `sh tests/state.sh ./lib/netguard-state.sh` and `sh tests/monitor.sh ./netguard-monitor ./lib/netguard-state.sh`. The state library passed **43 transitions** on a physical AX6000 with OpenWrt 24.10.5. The integrated manual monitor subsequently completed **three consecutive** `HEALTHY_SAMPLED → HEALTHY` cycles and exited cleanly. Failure cases have only been checked with simulated data, not by deliberately disconnecting WAN. The OpenWrt 25.12 VM has not yet been run.
+Tests: `sh tests/state.sh ./lib/netguard-state.sh` and `sh tests/monitor.sh ./netguard-monitor ./lib/netguard-state.sh`. The state library passed **43 transitions** on a physical AX6000 with OpenWrt 24.10.5. The integrated manual monitor subsequently completed **three consecutive** `HEALTHY_SAMPLED → HEALTHY` cycles and exited cleanly. Failure cases have only been checked with simulated data, not by deliberately disconnecting WAN. The earlier version passed the OpenWrt 25.12.5 QEMU suite; the new initialization logic still needs regression testing.
 
 ### Experimental service layer (do not install yet)
 
-A [foreground worker](netguard-worker) and [procd init script](service/netguard.init) have been prepared. **They have not been validated in real procd**, and there is no installer. Do not copy the init script to `/etc/init.d`, enable boot startup, or modify your router's service settings yet.
+A [foreground worker](netguard-worker) and [procd init script](service/netguard.init) have been prepared. Starting, stopping and restarting the worker under **real procd** passed in a disposable QEMU/OpenWrt 25.12.5 guest; they have not been installed on physical OpenWrt hardware. Do not copy the init script into `/etc/init.d` or enable boot startup yet.
 
-The [sample UCI config](examples/netguard) sets `monitor_enabled=0` by default. A future explicit enablement will be required before procd starts the worker. The provisional interval is 30 seconds after each completed check; procd would supervise the foreground process with rate-limited respawns.
+The [sample UCI config](examples/netguard) sets `monitor_enabled=0` by default. A future explicit enablement will be required before procd starts the worker. The default 30-second interval follows each completed check. Generic `startup_grace=90` seconds suppresses premature fault classification while WAN initializes, independently of Podkop or VPN. After the deadline, missing L3 is treated as an ordinary WAN symptom. Bounded manual runs disable grace by default, but may use `NETGUARD_STARTUP_GRACE` (0–300). procd would supervise the foreground process with rate-limited respawns.
 
 The worker writes an atomic current-state snapshot only to **RAM** (`/tmp/netguard-runtime/status`) and emits incident transition events. It does not persist per-probe history to flash. A crash can leave stale RAM state; this is **not yet a complete `status` CLI**.
 
@@ -102,7 +102,7 @@ NETGUARD_CHECK_PATH=/tmp/owrt-netguard NETGUARD_STATE_PATH=/tmp/netguard-state.s
 cat /tmp/netguard-runtime/status
 ```
 
-Current copies of `/tmp/owrt-netguard` and `/tmp/netguard-state.sh` are required. The `--forever` mode is intended solely for an explicitly enabled future procd service; **do not use it on a production router yet**. Offline tests: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. A [separate procd lifecycle test](tests/ci/procd-guest.sh) is prepared for the future OpenWrt 25.12.5 VM run: disabled startup, explicit enable, RAM state, stop and restart. It has not yet been executed. The worker has now been tested on a physical Redmi AX6000 running OpenWrt 24.10.5: three cycles returned `HEALTHY_SAMPLED`, with a final RAM snapshot of `running=0`, `phase=HEALTHY`, `result=HEALTHY_SAMPLED`, `cycle=3`. Actual procd process management, forced failures and persistent incident history are still untested.
+Current copies of `/tmp/owrt-netguard` and `/tmp/netguard-state.sh` are required. The `--forever` mode is intended solely for an explicitly enabled future procd service; **do not use it on a production router yet**. Offline tests: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. The [procd lifecycle test](tests/ci/procd-guest.sh) passed in QEMU/OpenWrt 25.12.5 (disabled start, explicit enable, RAM snapshot, stop and restart). New startup-grace scenarios have been added but have not yet been rerun.
 
 ## Development direction
 
@@ -140,7 +140,7 @@ Target OpenWrt releases for development and validation:
 
 The intended implementation is lightweight and based on standard OpenWrt mechanisms, without mandatory heavyweight runtime dependencies.
 
-These are **compatibility targets, not claims of fully tested support**. An experimental script is available, but no stable release has been published. An earlier revision ran on OpenWrt 24.10.5 hardware; OpenWrt 25.12 has not yet been verified in QEMU or on hardware.
+These are **compatibility targets, not claims of fully tested support**. Physical AX6000/OpenWrt 24.10.5 checks and a QEMU/OpenWrt 25.12.5 procd lifecycle run previously passed. The latest startup changes require new tests; physical OpenWrt 25.12 remains untested.
 
 ## Design principles
 
