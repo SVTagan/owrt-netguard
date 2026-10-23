@@ -201,7 +201,9 @@ NG_METRICS
     # An explicitly different unmarked egress path or an unknown route
     # cannot be promoted to a confirmed WAN sample, regardless of HTTP 200.
     if [ "$route_state" != MATCHES_WAN ]; then
-        quality=uncertain
+        # A timeout/DNS/TLS failure is still a failed probe; unknown route
+        # must not hide the failure in the separate path-uncertain counter.
+        case "$quality" in valid|reachable) quality=uncertain ;; esac
         case "$result" in MATCHED) result=PATH_UNCONFIRMED ;; esac
     fi
     cleanup
