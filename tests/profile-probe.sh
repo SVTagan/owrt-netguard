@@ -23,7 +23,7 @@ international|google|www.gstatic.com|auto|/generate_204|204|-'
                 allowlist) NG_PROFILE_TARGETS='ru_base|base|ya.ru|auto|/health|200|User-agent
 ru_diverse|selectel|selectel.ru|auto|/robots.txt|200|User-agent
 ru_diverse|timeweb|timeweb.com|auto|/robots.txt|200|User-agent' ;;
-                pinned|dns_fail) NG_PROFILE_TARGETS='ru_diverse|selectel|selectel.ru|192.0.2.5|/robots.txt|200|User-agent
+                pinned|dns_fail|pinned_remote_mismatch) NG_PROFILE_TARGETS='ru_diverse|selectel|selectel.ru|192.0.2.5|/robots.txt|200|User-agent
 ru_diverse|timeweb|timeweb.com|auto|/robots.txt|200|User-agent' ;;
                 pinned_mismatch) NG_PROFILE_TARGETS='ru_diverse|selectel|selectel.ru|203.0.113.5|/robots.txt|200|User-agent
 ru_diverse|timeweb|timeweb.com|auto|/robots.txt|200|User-agent' ;;
@@ -171,7 +171,7 @@ run pinned
 assert 'GROUP ru_diverse targets=2 matched=2'
 run pinned_remote_mismatch
 assert 'dns=PINNED result=PATH_UNCONFIRMED'
-assert 'GROUP ru_diverse targets=2 matched=0'
+assert 'GROUP ru_diverse targets=2 matched=1'
 run dns_fail
 assert 'dns=PINNED result=MATCHED'
 assert 'dns=SYSTEM result=DNS_FAILED'
