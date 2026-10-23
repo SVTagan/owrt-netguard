@@ -44,6 +44,8 @@ json_get() {
 }
 
 wan_up=$(json_get '@.up')
+wan_pending=$(json_get '@.pending')
+wan_available=$(json_get '@.available')
 wan_dev=$(json_get '@.l3_device')
 wan_phy=$(json_get '@.device')
 [ -n "$wan_phy" ] || wan_phy="$wan_dev"
@@ -54,11 +56,20 @@ if [ -r "/sys/class/net/$wan_phy/carrier" ]; then
 fi
 
 printf 'OWRT NetGuard — diagnostic prototype (read-only)\n'
-printf 'WAN: logical=%s device=%s l3_device=%s up=%s carrier=%s\n' "$wan" "$wan_phy" "$wan_dev" "$wan_up" "$carrier"
+printf 'WAN: logical=%s device=%s l3_device=%s up=%s pending=%s available=%s carrier=%s\n' "$wan" "$wan_phy" "$wan_dev" "$wan_up" "$wan_pending" "$wan_available" "$carrier"
 
 if [ "$carrier" = 0 ]; then
     printf 'RESULT: WAN_LINK_DOWN\n'
     printf 'NOTE: physical link lost; cause (local cable/port/upstream) unknown.\n'
+    exit 1
+fi
+
+# netifd explicitly distinguishes "being configured" from "down".
+# Report a separate observation so the monitor can apply a bounded startup
+# grace period; do not classify a DHCP/PPPoE setup as an immediate WAN fault.
+if [ "$wan_pending" = true ] && { [ "$wan_up" != true ] || [ -z "$wan_dev" ]; }; then
+    printf 'RESULT: WAN_INITIALIZING\n'
+    printf 'NOTE: netifd reports WAN setup pending; if this persists beyond startup grace, investigate L3 setup.\n'
     exit 1
 fi
 
