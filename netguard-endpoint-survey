@@ -1,0 +1,243 @@
+#!/bin/sh
+# OWRT NetGuard — one-shot exploratory HTTPS endpoint survey.
+# No service management, UCI writes, nft changes, route changes or persistent logs.
+# Candidate endpoints are NOT yet approved as production health sensors.
+
+set -u
+umask 077
+
+usage() {
+    cat <<'HELP'
+Usage: sh netguard-endpoint-survey [--profile all|ru|international] [--file /path/to/targets]
+Default profile: all.
+Target-file format (one entry per line):
+  group|name|https://host/path|expected_http|expected_body
+Groups: ru_base, ru_diverse, international
+Expected HTTP: 200, 204, 2xx, any
+Expected body: '-' (no body check) or a case-sensitive ASCII token.
+Limit: 16 targets. Only HTTPS/IPv4; no redirects are followed.
+The test uses the local DNS chain; curl binds connections to the selected
+WAN interface but does not guarantee bypass of nftables/PBR.
+Environment: OWRT_NETGUARD_WAN=wan
+HELP
+}
+
+profile=all
+file=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --profile)
+            [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            profile=$2
+            shift 2 ;;
+        --file)
+            [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            file=$2
+            shift 2 ;;
+        -h|--help|help) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+case "$profile" in all|ru|international) ;; *) usage >&2; exit 2 ;; esac
+
+wan=${OWRT_NETGUARD_WAN:-wan}
+case "$wan" in
+    ''|*[!a-zA-Z0-9_.-]*) printf 'ERROR: unsafe logical WAN name\n' >&2; exit 2 ;;
+esac
+for utility in ubus jsonfilter curl ip grep mktemp; do
+    command -v "$utility" >/dev/null 2>&1 || {
+        printf 'ERROR: missing command: %s\n' "$utility" >&2
+        exit 2
+    }
+done
+
+json=$(ubus call "network.interface.$wan" status 2>/dev/null) || {
+    printf 'ERROR: cannot read logical WAN status\n' >&2
+    exit 2
+}
+field() {
+    printf '%s\n' "$json" | jsonfilter -e "$1" 2>/dev/null | head -n 1
+}
+wan_up=$(field '@.up')
+wan_dev=$(field '@.l3_device')
+case "$wan_dev" in
+    ''|*[!a-zA-Z0-9_.:@-]*) printf 'ERROR: WAN has no valid L3 device\n' >&2; exit 2 ;;
+esac
+[ "$wan_up" = true ] || {
+    printf 'ERROR: WAN is not up (survey requires a ready interface)\n' >&2
+    exit 2
+}
+
+if [ -n "$file" ]; then
+    [ -r "$file" ] && [ -f "$file" ] || {
+        printf 'ERROR: target file is not readable\n' >&2
+        exit 2
+    }
+fi
+
+# This file is entirely in RAM. It exists only for endpoints with expected
+# response-body tokens and is deleted after each request and on exit.
+body_file=
+cleanup() {
+    [ -z "$body_file" ] || rm -f "$body_file"
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+
+count=0
+matched=0
+redirected=0
+incomplete=0
+failed=0
+
+route_for() {
+    address=$1
+    case "$address" in
+        ''|*[!0-9.]*|.*|*.|*..*) printf 'UNKNOWN'; return ;;
+    esac
+    route=$(ip -4 route get "$address" 2>/dev/null) || {
+        printf 'UNKNOWN'
+        return
+    }
+    case " $route " in
+        *" dev $wan_dev "*) printf 'MATCHES_WAN' ;;
+        *) printf 'OTHER_DEVICE' ;;
+    esac
+}
+
+survey() {
+    while IFS='|' read -r group name url expected token extra || [ -n "$group" ]; do
+        case "$group" in
+            ''|'#'*) continue ;;
+            ru_base|ru_diverse|international) ;;
+            *) printf 'ERROR: invalid group in target file\n' >&2; return 2 ;;
+        esac
+        case "$profile:$group" in
+            ru:international|international:ru_base|international:ru_diverse) continue ;;
+        esac
+        case "$name" in
+            ''|*[!a-zA-Z0-9_-]*) printf 'ERROR: invalid target name\n' >&2; return 2 ;;
+        esac
+        case "$url" in
+            https://*) ;;
+            *) printf 'ERROR: only HTTPS targets are allowed\n' >&2; return 2 ;;
+        esac
+        case "$url" in
+            *[!a-zA-Z0-9._~:/?&=%+#-]*)
+                printf 'ERROR: invalid characters in HTTPS URL\n' >&2
+                return 2 ;;
+        esac
+        case "$expected" in 200|204|2xx|any) ;; *)
+            printf 'ERROR: invalid expected HTTP contract\n' >&2; return 2 ;;
+        esac
+        case "$token" in
+            '-') ;;
+            ''|*[!a-zA-Z0-9_-]*) printf 'ERROR: invalid body token\n' >&2; return 2 ;;
+        esac
+        [ -z "$extra" ] || { printf 'ERROR: excess target fields\n' >&2; return 2; }
+        count=$((count + 1))
+        [ "$count" -le 16 ] || {
+            printf 'ERROR: too many targets (limit 16)\n' >&2
+            return 2
+        }
+
+        body_file=
+        output_file=/dev/null
+        if [ "$token" != '-' ]; then
+            body_file=$(mktemp /tmp/netguard-endpoint-body.XXXXXX) || return 2
+            output_file=$body_file
+        fi
+
+        # A separate curl process is used per target. HTTPS certificates are
+        # verified, proxies and redirects are disabled and downloads bounded.
+        # DNS resolution uses the router's existing local DNS configuration.
+        metrics=$(curl -4 --noproxy '*' --interface "if!$wan_dev" \
+            --proto '=https' --connect-timeout 3 --max-time 8 \
+            --max-filesize 131072 --silent \
+            --output "$output_file" \
+            --write-out '%{http_code}|%{remote_ip}|%{ssl_verify_result}|%{time_total}|%{size_download}' \
+            -- "$url" 2>/dev/null)
+        rc=$?
+        old_ifs=$IFS
+        IFS='|'
+        read -r http remote ssl time_total bytes <<EOF
+$metrics
+EOF
+        IFS=$old_ifs
+        http=${http:-000}
+        remote=${remote:--}
+        ssl=${ssl:--}
+        time_total=${time_total:--}
+        bytes=${bytes:--}
+
+        route_state=$(route_for "$remote")
+        tls=UNCONFIRMED
+        if { [ "$rc" -eq 0 ] || [ "$rc" -eq 63 ]; } && [ "$ssl" = 0 ] && [ "$http" != 000 ]; then
+            tls=VERIFIED
+        fi
+
+        judgment=ERROR
+        if [ "$rc" -eq 63 ]; then
+            judgment=BODY_LIMIT
+            incomplete=$((incomplete + 1))
+        elif [ "$rc" -ne 0 ]; then
+            failed=$((failed + 1))
+        elif [ "$tls" != VERIFIED ]; then
+            judgment=TLS_UNCONFIRMED
+            failed=$((failed + 1))
+        else
+            contract=no
+            case "$expected" in
+                2xx) case "$http" in 2[0-9][0-9]) contract=yes ;; esac ;;
+                any) case "$http" in [1-5][0-9][0-9]) contract=yes ;; esac ;;
+                *) [ "$http" = "$expected" ] && contract=yes ;;
+            esac
+            if [ "$contract" = yes ] && [ "$token" != '-' ]; then
+                grep -Fq "$token" "$body_file" 2>/dev/null || contract=no
+            fi
+            if [ "$contract" = yes ]; then
+                judgment=MATCHED
+                matched=$((matched + 1))
+            else
+                case "$http" in
+                    3[0-9][0-9])
+                        judgment=REDIRECT
+                        redirected=$((redirected + 1)) ;;
+                    *) judgment=CONTRACT_MISMATCH
+                        failed=$((failed + 1)) ;;
+                esac
+            fi
+        fi
+
+        cleanup
+        body_file=
+        printf '%s\n' "TARGET group=$group name=$name url=$url"
+        printf '%s\n' "  result=$judgment curl_rc=$rc http=$http tls=$tls remote_ip=$remote time_s=$time_total bytes=$bytes route_unmarked=$route_state"
+    done
+}
+
+printf 'OWRT NetGuard — exploratory endpoint survey (IPv4, read-only)\n'
+printf 'WAN logical=%s device=%s up=%s profile=%s dns=SYSTEM\n' "$wan" "$wan_dev" "$wan_up" "$profile"
+printf 'Limits: 3s connect, 8s total, 128KiB response body, no redirect following.\n'
+
+if [ -n "$file" ]; then
+    survey < "$file" || exit $?
+else
+    survey <<'TARGETS' || exit $?
+ru_base|ya|https://ya.ru/|2xx|-
+ru_base|mail|https://mail.ru/|2xx|-
+ru_diverse|reg|https://www.reg.ru/|2xx|-
+ru_diverse|nic|https://www.nic.ru/|2xx|-
+ru_diverse|timeweb|https://timeweb.com/|2xx|-
+international|gstatic|https://www.gstatic.com/generate_204|204|-
+international|apple|https://captive.apple.com/hotspot-detect.html|200|Success
+international|mozilla|https://detectportal.firefox.com/success.txt|200|success
+TARGETS
+fi
+
+printf 'SUMMARY: targets=%s matched=%s redirects=%s body_limit=%s other_failures=%s\n' \
+    "$count" "$matched" "$redirected" "$incomplete" "$failed"
+printf 'NOTE: MATCHED validates only this target and response contract, not general Internet reachability.\n'
+printf 'NOTE: DNS uses the local resolver; binding curl to WAN and unmarked route lookup do not prove bypass of nftables/PBR.\n'
+printf 'NOTE: 3xx and BODY_LIMIT require review, not automatic ISP-outage classification.\n'
