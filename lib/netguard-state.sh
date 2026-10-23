@@ -20,6 +20,7 @@ ng_observe_family() {
         EXTERNAL_REACHABILITY_UNCONFIRMED) ng_family=CONNECTIVITY ;;
         PARTIAL_REACHABILITY) ng_family=DEGRADED ;;
         UNKNOWN_ROUTE|PROBE_ERROR) ng_family=UNKNOWN ;;
+        WAN_INITIALIZING|STARTUP_WAIT) ng_family=STARTING ;;
         *) return 2 ;;
     esac
 }
@@ -28,6 +29,20 @@ ng_step() {
     [ "$#" -eq 1 ] || return 2
     ng_observe_family "$1" || return 2
     ng_last=$1
+
+    # WAN setup and the monitor's bounded startup grace are observations,
+    # not confirmed failures or recovery. Never close an open incident here.
+    if [ "$ng_family" = STARTING ]; then
+        ng_recovery=0
+        ng_streak=0
+        ng_pending=
+        ng_escalate=0
+        case "$ng_phase" in
+            OPEN|RECOVERING) ng_phase=OPEN ;;
+            *) ng_phase=STARTUP ;;
+        esac
+        return 0
+    fi
 
     if [ "$ng_family" = HEALTHY ]; then
         ng_escalate=0
