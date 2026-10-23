@@ -47,4 +47,4 @@ Use `--file /tmp/dns-targets --profile custom` for custom target lists. This is 
 
 The deterministic [`tests/dns-probe.sh`](../tests/dns-probe.sh) passed locally under BusyBox `ash`, `dash`, and `bash` using mocked `nslookup`, `ubus`, `ip`, and `jsonfilter`. Scenarios: local resolver failure with external success, blocked RU or international DNS with local success, all probes failing, spoof-like `Server` header without an A-record answer, mismatched route, WAN down, custom targets, and unsafe input validation.
 
-The tests are included in the manually triggered OpenWrt 25.12.5 QEMU workflow. **No QEMU run or AX6000 physical test has yet validated this new DNS module.** Do not interpret earlier successful CI runs as covering it.
+The mocked scenarios **passed [OpenWrt 25.12.5 QEMU workflow run #6](https://github.com/SVTagan/owrt-netguard/actions/runs/40032413103)** (2026-10-23), along with all prior regressions and the real one-shot legacy `HEALTHY_SAMPLED` check. The new DNS probe itself has **not yet been field-tested on physical AX6000**. Mock results and the legacy `check` do not establish whether queries reached the intended external DNS server.
