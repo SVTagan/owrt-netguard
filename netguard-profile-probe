@@ -1,0 +1,267 @@
+#!/bin/sh
+# OWRT NetGuard — experimental read-only grouped HTTPS sampler.
+# Not integrated with the existing 'check', worker, or procd.
+set -u
+umask 077
+
+usage() {
+    printf '%s\n' 'Usage: sh netguard-profile-probe [--profile russia|international|custom]'
+    printf '%s\n' 'Environment: NETGUARD_PROFILES_LIB=/path/to/netguard-profiles.sh'
+    printf '%s\n' '             OWRT_NETGUARD_CONFIG_DIR=/etc/config (or a /tmp preview)'
+    printf '%s\n' '             OWRT_NETGUARD_WAN=wan'
+}
+chosen=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --profile) [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            chosen=$2; shift 2 ;;
+        -h|--help|help) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+lib=${NETGUARD_PROFILES_LIB:-/usr/lib/netguard/netguard-profiles.sh}
+[ -r "$lib" ] || { printf 'ERROR: profiles library missing\n' >&2; exit 2; }
+for utility in ubus jsonfilter curl ip grep mktemp; do
+    command -v "$utility" >/dev/null 2>&1 || {
+        printf 'ERROR: required utility unavailable: %s\n' "$utility" >&2
+        exit 2
+    }
+done
+. "$lib"
+ng_profiles_load "$chosen" || exit 2
+[ "$NG_PROFILE_SELECTED" != legacy ] || {
+    printf 'ERROR: profile must be explicitly enabled; legacy check is unchanged\n' >&2
+    exit 2
+}
+wan=${OWRT_NETGUARD_WAN:-wan}
+case "$wan" in
+    ''|*[!a-zA-Z0-9_.-]*) printf 'ERROR: invalid logical WAN\n' >&2; exit 2 ;;
+esac
+json=$(ubus call "network.interface.$wan" status 2>/dev/null) || {
+    printf 'ERROR: cannot read WAN status\n' >&2; exit 2
+}
+field() {
+    printf '%s\n' "$json" | jsonfilter -e "$1" 2>/dev/null | head -n 1
+}
+up=$(field '@.up')
+wan_dev=$(field '@.l3_device')
+case "$wan_dev" in
+    ''|*[!a-zA-Z0-9_.:@-]*)
+        if [ "$up" = true ]; then
+            printf 'ERROR: WAN is up but L3 device is invalid\n' >&2; exit 2
+        fi
+        wan_dev=none ;;
+esac
+printf 'OWRT NetGuard — experimental profile HTTPS probe (read-only, IPv4)\n'
+printf 'PROFILE name=%s source=%s targets=%s wan=%s device=%s up=%s\n' \
+    "$NG_PROFILE_SELECTED" "$NG_PROFILE_SOURCE" "$NG_PROFILE_COUNT" "$wan" "$wan_dev" "$up"
+if [ "$up" != true ]; then
+    printf 'PROFILE_OBSERVATION: WAN_UNREADY\n'
+    printf 'NOTE: WAN status does not establish the reason for failure. No HTTPS probes performed.\n'
+    exit 0
+fi
+
+# A temporary RAM file is only used when a body-token contract is requested.
+# Cleanup even when a probe is interrupted.
+body_file=
+cleanup() { [ -z "$body_file" ] || rm -f "$body_file"; }
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+
+base_total=0; base_valid=0; base_reachable=0; base_fail=0; base_uncertain=0
+diverse_total=0; diverse_valid=0; diverse_reachable=0; diverse_fail=0; diverse_uncertain=0
+intl_total=0; intl_valid=0; intl_reachable=0; intl_fail=0; intl_uncertain=0
+all_valid=0; all_reachable=0; all_fail=0; all_uncertain=0
+
+route_for() {
+    case "$1" in ''|*[!0-9.]*|.*|*.|*..*) printf 'UNKNOWN'; return ;; esac
+    route=$(ip -4 route get "$1" 2>/dev/null) || { printf 'UNKNOWN'; return; }
+    case " $route " in
+        *" dev $wan_dev "*) printf 'MATCHES_WAN' ;;
+        *) printf 'OTHER_DEVICE' ;;
+    esac
+}
+
+record() {
+    # Group totals are incremented for every target, including failed probes.
+    case "$group" in
+        ru_base) prefix=base ;;
+        ru_diverse) prefix=diverse ;;
+        international) prefix=intl ;;
+    esac
+    case "$prefix" in
+        base)
+            base_total=$((base_total+1))
+            case "$1" in valid) base_valid=$((base_valid+1));; reachable) base_reachable=$((base_reachable+1));; uncertain) base_uncertain=$((base_uncertain+1));; *) base_fail=$((base_fail+1));; esac ;;
+        diverse)
+            diverse_total=$((diverse_total+1))
+            case "$1" in valid) diverse_valid=$((diverse_valid+1));; reachable) diverse_reachable=$((diverse_reachable+1));; uncertain) diverse_uncertain=$((diverse_uncertain+1));; *) diverse_fail=$((diverse_fail+1));; esac ;;
+        intl)
+            intl_total=$((intl_total+1))
+            case "$1" in valid) intl_valid=$((intl_valid+1));; reachable) intl_reachable=$((intl_reachable+1));; uncertain) intl_uncertain=$((intl_uncertain+1));; *) intl_fail=$((intl_fail+1));; esac ;;
+    esac
+    case "$1" in
+        valid) all_valid=$((all_valid+1)) ;;
+        reachable) all_reachable=$((all_reachable+1)) ;;
+        uncertain) all_uncertain=$((all_uncertain+1)) ;;
+        *) all_fail=$((all_fail+1)) ;;
+    esac
+}
+
+probe_one() {
+    group=$1; name=$2; host=$3; pinned=$4; path=$5; expected=$6; token=$7
+    dns_mode=SYSTEM
+    route_before=UNKNOWN
+    if [ "$pinned" != auto ]; then
+        dns_mode=PINNED
+        route_before=$(route_for "$pinned")
+    fi
+    if [ "$route_before" = OTHER_DEVICE ]; then
+        printf 'TARGET group=%s name=%s dns=%s result=SKIPPED_ROUTE route_unmarked=%s\n' \
+            "$group" "$name" "$dns_mode" "$route_before"
+        record uncertain
+        return 0
+    fi
+    body_file=
+    out=/dev/null
+    if [ "$token" != - ]; then
+        body_file=$(mktemp /tmp/netguard-profile-probe.XXXXXX) || {
+            printf 'ERROR: temporary RAM file creation failed\n' >&2
+            return 2
+        }
+        out=$body_file
+    fi
+    if [ "$dns_mode" = PINNED ]; then
+        metrics=$(curl -4 --noproxy '*' --interface "if!$wan_dev" \
+            --proto '=https' --resolve "$host:443:$pinned" \
+            --connect-timeout 4 --max-time 8 --max-filesize 32768 \
+            --silent --output "$out" \
+            --write-out '%{http_code}|%{remote_ip}|%{ssl_verify_result}|%{time_total}|%{size_download}' \
+            -- "https://$host$path" 2>/dev/null)
+        rc=$?
+    else
+        metrics=$(curl -4 --noproxy '*' --interface "if!$wan_dev" \
+            --proto '=https' --connect-timeout 4 --max-time 8 --max-filesize 32768 \
+            --silent --output "$out" \
+            --write-out '%{http_code}|%{remote_ip}|%{ssl_verify_result}|%{time_total}|%{size_download}' \
+            -- "https://$host$path" 2>/dev/null)
+        rc=$?
+    fi
+    old_ifs=$IFS
+    IFS='|'
+    read -r http remote ssl time_total bytes <<NG_METRICS
+$metrics
+NG_METRICS
+    IFS=$old_ifs
+    http=${http:-000}
+    remote=${remote:--}
+    ssl=${ssl:--}
+    time_total=${time_total:--}
+    bytes=${bytes:--}
+    if [ "$dns_mode" = PINNED ]; then
+        route_state=$route_before
+    else
+        route_state=$(route_for "$remote")
+    fi
+    result=CONNECT_FAILED
+    quality=failed
+    # HTTP status alone can never satisfy a body-token contract.
+    if [ "$rc" -eq 63 ]; then
+        result=BODY_LIMIT
+    elif [ "$rc" -ne 0 ]; then
+        case "$rc" in
+            28) result=TIMEOUT ;;
+            6) result=DNS_FAILED ;;
+            35|51|60) result=TLS_FAILED ;;
+            *) result=CONNECT_FAILED ;;
+        esac
+    elif [ "$ssl" != 0 ] || [ "$http" = 000 ]; then
+        result=TLS_OR_HTTP_UNCONFIRMED
+    else
+        ok=0
+        case "$expected" in
+            2xx) case "$http" in 2[0-9][0-9]) ok=1 ;; esac ;;
+            *) [ "$http" = "$expected" ] && ok=1 ;;
+        esac
+        if [ "$ok" -eq 1 ] && [ "$token" != - ]; then
+            grep -Fq -- "$token" "$body_file" 2>/dev/null || ok=0
+        fi
+        if [ "$ok" -eq 1 ]; then
+            result=MATCHED
+            quality=valid
+        else
+            case "$http" in
+                3[0-9][0-9]) result=REDIRECT ;;
+                *) result=CONTRACT_MISMATCH ;;
+            esac
+            quality=reachable
+        fi
+    fi
+    # An explicitly different unmarked egress path or an unknown route
+    # cannot be promoted to a confirmed WAN sample, regardless of HTTP 200.
+    if [ "$route_state" != MATCHES_WAN ]; then
+        quality=uncertain
+        case "$result" in MATCHED) result=PATH_UNCONFIRMED ;; esac
+    fi
+    cleanup
+    body_file=
+    printf 'TARGET group=%s name=%s dns=%s result=%s curl_rc=%s http=%s tls_verify=%s remote_ip=%s time_s=%s bytes=%s route_unmarked=%s\n' \
+        "$group" "$name" "$dns_mode" "$result" "$rc" "$http" "$ssl" "$remote" "$time_total" "$bytes" "$route_state"
+    record "$quality"
+}
+
+# ng_profiles_load verified exactly six separators per entry; use a here-doc
+# rather than a pipeline so group counters remain in the parent process.
+while IFS='|' read -r group name host pinned path expected token || [ -n "$group" ]; do
+    [ -n "$group" ] || continue
+    probe_one "$group" "$name" "$host" "$pinned" "$path" "$expected" "$token" || exit 2
+done <<NG_TARGETS
+$NG_PROFILE_TARGETS
+NG_TARGETS
+
+printf 'GROUP ru_base targets=%s matched=%s reachable_unverified=%s failed=%s path_uncertain=%s\n' \
+    "$base_total" "$base_valid" "$base_reachable" "$base_fail" "$base_uncertain"
+printf 'GROUP ru_diverse targets=%s matched=%s reachable_unverified=%s failed=%s path_uncertain=%s\n' \
+    "$diverse_total" "$diverse_valid" "$diverse_reachable" "$diverse_fail" "$diverse_uncertain"
+printf 'GROUP international targets=%s matched=%s reachable_unverified=%s failed=%s path_uncertain=%s\n' \
+    "$intl_total" "$intl_valid" "$intl_reachable" "$intl_fail" "$intl_uncertain"
+if [ "$NG_PROFILE_SELECTED" = russia ] && [ "$diverse_total" -lt 3 ]; then
+    printf 'NOTE: LIMITED_TARGET_DIVERSITY (fewer than 3 configured RU-diverse targets; provider independence is not automatic)\n'
+fi
+case "$NG_PROFILE_SELECTED" in
+    russia)
+        if [ "$diverse_valid" -ge 2 ]; then
+            observation=RU_REACHABLE_SAMPLED
+        elif [ "$diverse_valid" -eq 1 ]; then
+            observation=RU_PARTIALLY_CONFIRMED
+        elif [ "$base_valid" -gt 0 ] || [ "$base_reachable" -gt 0 ]; then
+            observation=POSSIBLE_LIMITED_ACCESS
+        else
+            observation=RU_ACCESS_UNCONFIRMED
+        fi
+        if [ "$intl_total" -gt 0 ] && [ "$intl_valid" -eq 0 ]; then
+            printf 'NOTE: INTERNATIONAL_UNCONFIRMED (does not invalidate confirmed RU accessibility)\n'
+        fi ;;
+    international)
+        if [ "$intl_valid" -gt 0 ]; then
+            observation=INTERNATIONAL_REACHABLE_SAMPLED
+        else
+            observation=INTERNATIONAL_UNCONFIRMED
+        fi ;;
+    custom)
+        if [ "$all_valid" -ge 2 ]; then
+            observation=CUSTOM_REACHABLE_SAMPLED
+        elif [ "$all_valid" -eq 1 ]; then
+            observation=CUSTOM_PARTIALLY_CONFIRMED
+        elif [ "$all_reachable" -gt 0 ]; then
+            observation=TRANSPORT_REACHABLE_CONTRACT_UNCONFIRMED
+        else
+            observation=EXTERNAL_ACCESS_UNCONFIRMED
+        fi ;;
+esac
+printf 'PROFILE_OBSERVATION: %s\n' "$observation"
+printf 'NOTE: Endpoint failures, TSPU filtering and local DNS errors cannot alone prove an ISP outage.\n'
+printf 'NOTE: curl interface binding and unmarked route lookup do not prove bypass of nftables/PBR.\n'
+printf 'NOTE: Profile observations are not connected to legacy RESULT, worker or incident state machine.\n'
+exit 0
