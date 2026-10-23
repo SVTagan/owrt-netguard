@@ -62,6 +62,7 @@ esac
 MOCK
 cat > "$work/bin/curl" <<'MOCK'
 #!/bin/sh
+[ "${1:-}" = -q ] || exit 97
 out=
 url=
 resolve=
@@ -108,6 +109,9 @@ case "${NG_TEST_MODE:-}:$name" in
     path_mismatch:timeweb)
         [ "$out" = /dev/null ] || printf 'User-agent' > "$out"
         printf '200|198.51.100.5|0|0.200|10'; exit 0 ;;
+    pinned_remote_mismatch:selectel)
+        [ "$out" = /dev/null ] || printf 'User-agent' > "$out"
+        printf '200|203.0.113.202|0|0.200|10'; exit 0 ;;
     body_limit:timeweb)
         printf '200|192.0.2.6|0|0.200|32768'; exit 63 ;;
     *) ;;
@@ -119,7 +123,11 @@ elif [ "$name" = google ]; then
     printf '204|192.0.2.7|0|0.200|0'
 else
     [ "$out" = /dev/null ] || printf 'User-agent' > "$out"
-    printf '200|192.0.2.5|0|0.200|10'
+    if [ "$name" = timeweb ] && [ -n "$resolve" ]; then
+        printf '200|192.0.2.6|0|0.200|10'
+    else
+        printf '200|192.0.2.5|0|0.200|10'
+    fi
 fi
 MOCK
 chmod +x "$work/bin"/*
@@ -160,7 +168,10 @@ run body_limit
 assert 'result=BODY_LIMIT'
 assert 'PROFILE_OBSERVATION: RU_PARTIALLY_CONFIRMED'
 run pinned
-assert 'dns=PINNED result=MATCHED'
+assert 'GROUP ru_diverse targets=2 matched=2'
+run pinned_remote_mismatch
+assert 'dns=PINNED result=PATH_UNCONFIRMED'
+assert 'GROUP ru_diverse targets=2 matched=0'
 run dns_fail
 assert 'dns=PINNED result=MATCHED'
 assert 'dns=SYSTEM result=DNS_FAILED'
