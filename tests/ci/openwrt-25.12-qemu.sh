@@ -112,6 +112,8 @@ ssh_guest 'sh /tmp/netguard-worker-test.sh /tmp/netguard-worker /tmp/netguard-st
 ssh_guest 'sh /tmp/netguard-path-audit-test.sh /tmp/netguard-path-audit'
 ssh_guest 'sh /tmp/netguard-endpoint-survey-test.sh /tmp/netguard-endpoint-survey'
 ssh_guest 'sh /tmp/netguard-profiles-test.sh /tmp/netguard-profiles /tmp/netguard-profiles.sh'
+echo "== Validate preview profile using real guest UCI, not just mocks =="
+ssh_guest 'mkdir -p /tmp/netguard-profile-preview && cp /tmp/netguard-profiles-preview /tmp/netguard-profile-preview/netguard && OWRT_NETGUARD_CONFIG_DIR=/tmp/netguard-profile-preview NETGUARD_PROFILES_LIB=/tmp/netguard-profiles.sh sh /tmp/netguard-profiles show > /tmp/netguard-profile-preview.out && grep -q "^PROFILE selected=russia source=uci+uci-targets targets=2$" /tmp/netguard-profile-preview.out && grep -q "^GROUP_COUNTS ru_base=0 ru_diverse=2 international=0$" /tmp/netguard-profile-preview.out && cat /tmp/netguard-profile-preview.out'
 
 echo "== Run real one-shot probe in VM; endpoint reachability is informational =="
 # A CI runner is NOT representative of Crimea or any ISP. Any meaningful
