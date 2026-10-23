@@ -24,6 +24,8 @@ case "$NETGUARD_TEST_SCENARIO" in
     internal_failure)
         printf 'ERROR: deliberately simulated missing dependency\n'
         exit 2 ;;
+    startup_failure) result=WAN_NO_L3 ;;
+    netifd_pending) result=WAN_INITIALIZING ;;
     *) result=HEALTHY_SAMPLED ;;
 esac
 printf 'RESULT: %s\n' "$result"
@@ -37,8 +39,10 @@ chmod +x "$tmp/fake-check"
 run() {
     scenario=$1
     cycles=$2
+    grace=${3:-0}
     mkdir -p "$tmp/$scenario"
     printf '0\n' > "$tmp/counter"
+    NETGUARD_STARTUP_GRACE="$grace" \
     NETGUARD_TEST_COUNTER="$tmp/counter" \
     NETGUARD_TEST_SCENARIO="$scenario" \
     NETGUARD_CHECK_PATH="$tmp/fake-check" \
@@ -57,6 +61,33 @@ grep -qx 'RESOLVED 1 WAN' "$tmp/outage_then_recovery.log"
 grep -qx 'phase=HEALTHY' "$tmp/outage_then_recovery/status"
 grep -qx 'result=HEALTHY_SAMPLED' "$tmp/outage_then_recovery/status"
 
+# An initial WAN failure is visible but cannot open an incident during grace.
+run startup_failure 5 90
+grep -qx 'phase=STARTUP' "$tmp/startup_failure/status"
+grep -qx 'result=STARTUP_WAIT' "$tmp/startup_failure/status"
+grep -qx 'observed_result=WAN_NO_L3' "$tmp/startup_failure/status"
+grep -qx 'startup_grace_s=90' "$tmp/startup_failure/status"
+if grep -q '^OPEN ' "$tmp/startup_failure.log"; then
+    echo 'FAIL: startup grace opened a premature incident' >&2
+    exit 1
+fi
+
+# The same failure must become a WAN incident with grace disabled.
+run startup_failure 3 0
+grep -qx 'OPEN 1 WAN' "$tmp/startup_failure.log"
+grep -qx 'phase=OPEN' "$tmp/startup_failure/status"
+
+# netifd pending setup is not a confirmed outage during grace.
+run netifd_pending 3 90
+grep -qx 'phase=STARTUP' "$tmp/netifd_pending/status"
+grep -qx 'observed_result=WAN_INITIALIZING' "$tmp/netifd_pending/status"
+
+# A WAN still pending after deadline becomes a diagnosable missing-L3 fault.
+run netifd_pending 3 0
+grep -qx 'OPEN 1 WAN' "$tmp/netifd_pending.log"
+grep -qx 'result=WAN_NO_L3' "$tmp/netifd_pending/status"
+grep -qx 'observed_result=WAN_INITIALIZING' "$tmp/netifd_pending/status"
+
 run internal_failure 3
 grep -qx 'phase=UNKNOWN' "$tmp/internal_failure/status"
 grep -qx 'result=PROBE_ERROR' "$tmp/internal_failure/status"
@@ -74,6 +105,10 @@ if sh "$worker" --forever 0 >/dev/null 2>&1; then
     echo 'FAIL: unsafe endless zero-delay mode accepted' >&2
     exit 1
 fi
+if NETGUARD_STARTUP_GRACE=301 sh "$worker" --cycles 1 0 >/dev/null 2>&1; then
+    echo 'FAIL: startup grace beyond safe range accepted' >&2
+    exit 1
+fi
 
 # Reject persistent state directories.
 if NETGUARD_RUNTIME_DIR=/etc/netguard \
@@ -84,4 +119,4 @@ if NETGUARD_RUNTIME_DIR=/etc/netguard \
     exit 1
 fi
 
-echo 'PASS: worker transitions, RAM snapshot, probe errors, safe invocation limits'
+echo 'PASS: worker transitions, bounded startup grace, pending WAN, RAM snapshot and safe invocation limits'
