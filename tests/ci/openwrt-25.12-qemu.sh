@@ -94,11 +94,15 @@ ssh_input 'cat > /tmp/netguard-path-audit' < netguard-path-audit
 ssh_input 'cat > /tmp/netguard-path-audit-test.sh' < tests/path-audit.sh
 ssh_input 'cat > /tmp/netguard-endpoint-survey' < netguard-endpoint-survey
 ssh_input 'cat > /tmp/netguard-endpoint-survey-test.sh' < tests/endpoint-survey.sh
+ssh_input 'cat > /tmp/netguard-profiles.sh' < lib/netguard-profiles.sh
+ssh_input 'cat > /tmp/netguard-profiles' < netguard-profiles
+ssh_input 'cat > /tmp/netguard-profiles-test.sh' < tests/profiles.sh
+ssh_input 'cat > /tmp/netguard-profiles-preview' < examples/netguard-profiles.preview
 ssh_input 'cat > /tmp/netguard-init.sh' < service/netguard.init
 ssh_input 'cat > /tmp/netguard-procd-test.sh' < tests/ci/procd-guest.sh
 
 echo "== Syntax test using OpenWrt BusyBox shell =="
-ssh_guest 'sh -n /tmp/owrt-netguard && sh -n /tmp/netguard-smoke.sh && sh -n /tmp/netguard-state.sh && sh -n /tmp/netguard-state-test.sh && sh -n /tmp/netguard-monitor && sh -n /tmp/netguard-monitor-test.sh && sh -n /tmp/netguard-worker && sh -n /tmp/netguard-worker-test.sh && sh -n /tmp/netguard-path-audit && sh -n /tmp/netguard-path-audit-test.sh && sh -n /tmp/netguard-endpoint-survey && sh -n /tmp/netguard-endpoint-survey-test.sh && sh -n /tmp/netguard-init.sh && sh -n /tmp/netguard-procd-test.sh'
+ssh_guest 'sh -n /tmp/owrt-netguard && sh -n /tmp/netguard-smoke.sh && sh -n /tmp/netguard-state.sh && sh -n /tmp/netguard-state-test.sh && sh -n /tmp/netguard-monitor && sh -n /tmp/netguard-monitor-test.sh && sh -n /tmp/netguard-worker && sh -n /tmp/netguard-worker-test.sh && sh -n /tmp/netguard-path-audit && sh -n /tmp/netguard-path-audit-test.sh && sh -n /tmp/netguard-endpoint-survey && sh -n /tmp/netguard-endpoint-survey-test.sh && sh -n /tmp/netguard-profiles.sh && sh -n /tmp/netguard-profiles && sh -n /tmp/netguard-profiles-test.sh && sh -n /tmp/netguard-init.sh && sh -n /tmp/netguard-procd-test.sh'
 
 echo "== Run deterministic smoke tests inside genuine OpenWrt 25.12 =="
 ssh_guest 'sh /tmp/netguard-smoke.sh /tmp/owrt-netguard'
@@ -107,6 +111,7 @@ ssh_guest 'sh /tmp/netguard-monitor-test.sh /tmp/netguard-monitor /tmp/netguard-
 ssh_guest 'sh /tmp/netguard-worker-test.sh /tmp/netguard-worker /tmp/netguard-state.sh'
 ssh_guest 'sh /tmp/netguard-path-audit-test.sh /tmp/netguard-path-audit'
 ssh_guest 'sh /tmp/netguard-endpoint-survey-test.sh /tmp/netguard-endpoint-survey'
+ssh_guest 'sh /tmp/netguard-profiles-test.sh /tmp/netguard-profiles /tmp/netguard-profiles.sh'
 
 echo "== Run real one-shot probe in VM; endpoint reachability is informational =="
 # A CI runner is NOT representative of Crimea or any ISP. Any meaningful
