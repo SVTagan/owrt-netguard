@@ -104,6 +104,16 @@ cat /tmp/netguard-runtime/status
 
 Current copies of `/tmp/owrt-netguard` and `/tmp/netguard-state.sh` are required. The `--forever` mode is intended solely for an explicitly enabled future procd service; **do not use it on a production router yet**. Offline tests: `sh tests/worker.sh ./netguard-worker ./lib/netguard-state.sh`. The [procd lifecycle test](tests/ci/procd-guest.sh) passed in QEMU/OpenWrt 25.12.5 (disabled start, explicit enable, RAM snapshot, stop and restart). The second QEMU run passed the new startup-grace scenarios.
 
+### Endpoint profiles: experimental configuration loader
+
+Phase 1 is implemented in [`lib/netguard-profiles.sh`](lib/netguard-profiles.sh) and [`netguard-profiles`](netguard-profiles). These commands **only validate and display configuration**; the original `owrt-netguard check`, legacy `list https` / `list dns` options and procd worker remain unchanged.
+
+Explicit profiles: `russia` (two research RU candidates: Selectel and Timeweb), `international` (Google gstatic, Apple, Mozilla), and `custom` (user-defined targets). New UCI `list https_target` uses `group|name|TLS-host|IPv4-or-auto|path|expected-HTTP|body-token-or-dash`, up to 12 entries with strict validation and duplicate detection. `auto` uses the system resolver, unlike pinned IPv4. The RU defaults are **not universal or production-certified**; the inspector warns `LIMITED_TARGET_DIVERSITY` because only two candidates were verified on one ISP connection.
+
+The [`examples/netguard-profiles.preview`](examples/netguard-profiles.preview) UCI sample is **for inspection in /tmp only**. Do not install it in `/etc/config/netguard`: the main diagnostic engine does not yet consume profile fields and would continue using legacy defaults. With no selected profile, inspection reports `LEGACY_UNCHANGED`. See [`docs/endpoint-profiles.md`](docs/endpoint-profiles.md) for the design contract.
+
+Local offline [`tests/profiles.sh`](tests/profiles.sh) cases passed under BusyBox `ash` 1.37, `dash` and `bash`. The suite is wired into manual QEMU CI, but **has not yet run there**. The new loader has not been field-tested on the AX6000.
+
 ### Exploratory regional endpoint survey
 
 A separate manual [`netguard-endpoint-survey`](netguard-endpoint-survey) tool gathers evidence for choosing future RU and international endpoints. Its targets are **candidates, not approved monitoring defaults**. Russian sites may redirect, change IP addresses or exceed the download limit, and overseas targets may be intentionally blocked on some networks. None of these observations alone proves an ISP outage.
