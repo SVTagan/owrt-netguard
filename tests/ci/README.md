@@ -16,6 +16,8 @@ This directory contains an **active, manually triggered** QEMU test harness for 
 
 **Profile loader:** The standalone `netguard-profiles` CLI, `lib/netguard-profiles.sh` UCI loader and `tests/profiles.sh` **passed run #3**, including actual guest UCI parsing of `examples/netguard-profiles.preview`. Field testing on physical AX6000 is still pending. Legacy `check` and procd worker remain unchanged.
 
+**Next manually triggered regression (not yet run):** `netguard-profile-probe` and `tests/profile-probe.sh` are now copied into guest RAM, syntax-checked and exercised with deterministic mocks under OpenWrt BusyBox ash. New scenarios verify RU/intl isolation, possible allowlist-only access, pinned IPv4 success despite system DNS failure, strict response contracts and PBR route uncertainty. Local BusyBox ash/dash/bash suites passed; these new files are **not** part of prior successful run #3. The existing legacy `check` and procd lifecycle are unchanged.
+
 Reference: https://openwrt.org/docs/guide-user/virtualization/qemu
 
 **Security:** Only use the default empty root password in the disposable, isolated test VM, never on a real Internet-exposed OpenWrt system.
