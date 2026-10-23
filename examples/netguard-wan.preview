@@ -1,0 +1,12 @@
+# EXPERIMENTAL WAN-only preview; not intended for /etc/config/netguard.
+# The two IPv4 addresses were observed on ONE AX6000 WAN on 2026-10-24.
+# They are research pins, not perpetual mappings or a universal RU quorum.
+# No automatic refresh: stale pins mean UNCONFIRMED, not ISP failure.
+# Place in /tmp/netguard-wan-preview/netguard for manual read-only testing.
+
+config netguard 'main'
+    option monitor_enabled '0'
+    option wan 'wan'
+    option profile 'russia'
+    list https_target 'ru_diverse|selectel|selectel.ru|94.26.255.104|/robots.txt|200|User-agent'
+    list https_target 'ru_diverse|timeweb|timeweb.com|185.65.148.89|/robots.txt|200|User-agent'
