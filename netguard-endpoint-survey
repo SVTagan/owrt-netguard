@@ -124,7 +124,7 @@ survey() {
             *) printf 'ERROR: only HTTPS targets are allowed\n' >&2; return 2 ;;
         esac
         case "$url" in
-            *[!a-zA-Z0-9._~:/?&=%+#-]*)
+            *[!a-zA-Z0-9._~:/?\&=%+#-]*)
                 printf 'ERROR: invalid characters in HTTPS URL\n' >&2
                 return 2 ;;
         esac
