@@ -1,0 +1,122 @@
+#!/bin/sh
+# OWRT NetGuard: read-only IPv4 WAN routing evidence, not packet tracing.
+# This command never modifies routes, nftables, interfaces or services.
+# Output is deliberately conservative: matching a route does not certify that
+# the packet escaped all output hooks or network-provider filtering.
+
+set -u
+
+usage() {
+    printf 'Usage: sh netguard-path-audit [IPv4_TARGET]\n'
+    printf 'Default target: 1.1.1.1 (Cloudflare diagnostic IP).\n'
+    printf 'Environment: OWRT_NETGUARD_WAN=wan\n'
+}
+case "${1:-}" in
+    -h|--help|help) usage; exit 0 ;;
+esac
+[ "$#" -le 1 ] || { usage >&2; exit 2; }
+target=${1:-1.1.1.1}
+set -f
+valid_ipv4() {
+    case "$1" in
+        ''|*[!0-9.]*|.*|*.|*..*) return 1 ;;
+    esac
+    old_ifs=$IFS
+    IFS=.
+    set -- $1
+    IFS=$old_ifs
+    [ "$#" -eq 4 ] || return 1
+    for octet in "$@"; do
+        case "$octet" in ''|*[!0-9]*) return 1 ;; esac
+        [ "$octet" -ge 0 ] 2>/dev/null && [ "$octet" -le 255 ] 2>/dev/null || return 1
+    done
+}
+valid_ipv4 "$target" || { printf 'ERROR: invalid IPv4 target\n' >&2; exit 2; }
+
+wan=${OWRT_NETGUARD_WAN:-wan}
+case "$wan" in
+    ''|*[!a-zA-Z0-9_.-]*) printf 'ERROR: invalid logical WAN name\n' >&2; exit 2 ;;
+esac
+for utility in ubus jsonfilter ip; do
+    command -v "$utility" >/dev/null 2>&1 || {
+        printf 'ERROR: missing command: %s\n' "$utility" >&2
+        exit 2
+    }
+done
+
+json=$(ubus call "network.interface.$wan" status 2>/dev/null) || {
+    printf 'ERROR: WAN is not available through ubus\n' >&2
+    exit 2
+}
+field() {
+    printf '%s\n' "$json" | jsonfilter -e "$1" 2>/dev/null | head -n 1
+}
+up=$(field '@.up')
+dev=$(field '@.l3_device')
+case "$dev" in
+    ''|*[!a-zA-Z0-9_.:@-]*) dev= ;;
+esac
+
+printf 'NETGUARD WAN PATH AUDIT — routing evidence only (IPv4, read-only)\n'
+printf 'WAN logical=%s device=%s up=%s target=%s\n' "$wan" "${dev:-unknown}" "$up" "$target"
+
+route_state=UNKNOWN
+if [ -n "$dev" ] && [ "$up" = true ]; then
+    route=$(ip -4 route get "$target" 2>/dev/null) || route=
+    if [ -n "$route" ]; then
+        case " $route " in
+            *" dev $dev "*) route_state=MATCHES_WAN ;;
+            *) route_state=OTHER_DEVICE ;;
+        esac
+    fi
+else
+    route_state=WAN_NOT_READY
+fi
+printf 'ROUTE_UNMARKED: %s\n' "$route_state"
+
+# ip rule is a read-only view of routing policy; extra rules do not prove that
+# this target matches any selector. We intentionally report only presence.
+policy=UNKNOWN
+if rules=$(ip -4 rule show 2>/dev/null); then
+    policy=DEFAULT_ONLY
+    old_ifs=$IFS
+    IFS='
+'
+    for rule in $rules; do
+        case "$rule" in
+            '0:'*'from all lookup local'|'32766:'*'from all lookup main'|'32767:'*'from all lookup default'|'') ;;
+            *) policy=ADDITIONAL_RULES; break ;;
+        esac
+    done
+    IFS=$old_ifs
+fi
+printf 'IPV4_POLICY_RULES: %s\n' "$policy"
+
+# nft is optional. Use terse mode so potentially large sets are not dumped.
+# Only indicate output hooks that could modify route selection; this does not
+# resolve the rules' conditions, jumps or the path taken by this specific flow.
+nft_route=UNKNOWN
+nft_nat=UNKNOWN
+if command -v nft >/dev/null 2>&1; then
+    if chains=$(nft -t list ruleset 2>/dev/null); then
+        nft_route=NO
+        nft_nat=NO
+        case "$chains" in
+            *'type route hook output '*) nft_route=YES ;;
+        esac
+        case "$chains" in
+            *'type nat hook output '*) nft_nat=YES ;;
+        esac
+    fi
+fi
+printf 'NFT_ROUTE_OUTPUT_HOOK: %s\n' "$nft_route"
+printf 'NFT_NAT_OUTPUT_HOOK: %s\n' "$nft_nat"
+
+case "$route_state" in
+    MATCHES_WAN) result=ROUTE_MATCH_ONLY ;;
+    OTHER_DEVICE) result=ROUTE_MISMATCH ;;
+    *) result=INSUFFICIENT_EVIDENCE ;;
+esac
+printf 'PATH_AUDIT: %s\n' "$result"
+printf 'NOTE: neither interface binding, unmarked route lookup nor nft hook inventory proves a direct, unmodified WAN packet path.\n'
+printf 'NOTE: extra IP rules or output hooks are risk indicators, not proof of interception.\n'
